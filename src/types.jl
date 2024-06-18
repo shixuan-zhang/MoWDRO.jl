@@ -13,11 +13,26 @@ end
 struct MasterProblem
     # master problem JuMP model
     model::JuMP.Model
-    # state variable references
-    var_state::Vector{JuMP.VariableRef}
-    # linear objective coefficient vector
-    vec_coeff::Vector{Float64}
+    # state and control variable references
+    var_stat::Vector{JuMP.VariableRef}
+    var_ctrl::Vector{JuMP.VariableRef}
+    # variable reference for recourse/loss function
+    var_loss::JuMP.VariableRef
+    # linear objective coefficient vectors
+    obj_stat::Vector{Float64}
+    obj_ctrl::Vector{Float64}
 end
+
+# structure for the master (first-stage) solution
+struct MasterSolution
+    # master problem state and control solutions
+    sol_stat::Vector{Float64}
+    sol_ctrl::Vector{Float64}
+    # master problem objective and recourse value
+    val_obj::Float64
+    val_rec::Float64
+end
+
 
 # structure for (second-stage) recourse/loss functions of the form:
 # g(x,ξ) := min  (1,x)'⋅[(1,ξ,η)'⋅F₀⋅(1,ξ,η),…,(1,ξ,η)'⋅Fₙ⋅(1,ξ,η)]
