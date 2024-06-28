@@ -3,8 +3,12 @@ module MoWDRO
 
 # import basic mathematics and statistics modules
 import LinearAlgebra, Random, Statistics
-# import optimization modules
-import JuMP, Clp, CSDP
+using JuMP
+# set default solvers
+import Clp, CSDP
+const DEFAULT_LP = Clp
+const DEFAULT_QCP = CSDP
+const DEFAULT_SDP = CSDP
 
 # define module-wide shared parameters
 const NUM_DIG = 8
@@ -16,7 +20,7 @@ const NUM_MAX_ITER = 1000
 include("types.jl")
 
 # include algorithms and relaxations
-include("linear_relax.jl")
+include("moment_relax.jl")
 include("level_bundle.jl")
 
 # define the main methods

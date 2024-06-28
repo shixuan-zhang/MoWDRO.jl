@@ -1,47 +1,77 @@
-# Level bundle method for solving the master problem
+# Level bundle method for solving the master problem of the form
+# min  f_x'⋅x + f_y'⋅y + ϕ(x,w)
+# s.t. (x,y) ∈ Feasible Set, w ≥ 0.
+# Artificial upper bound on w is needed for convergence.
 
 function solve_master_level(
         master::MasterProblem,
         recourse::Function;
         max_iter::Int = NUM_MAX_ITER,
         opt_gap::Float64 = VAL_TOL,
+        max_aux::Float64 = VAL_INF,
         level::Float64 = 0.5,
         print::Bool = false
     )::MasterSolution
+    # set the objective expression
+    obj = master.f_x'*master.x + master.f_y'*master.y + master.ϕ
+    # add the artificial bound on the Wasserstein auxiliary variable w 
+    set_upper_bound(master.w, max_aux)
     # get the initial solution and lower bound
-    expr_obj = master.obj_stat'*master.var_stat + master.obj_ctrl'*master.var_ctrl + master.var_loss
-    JuMP.@objective(master.model, Min, expr_obj)
-    JuMP.optimize!(master.model)
-    sol_stat = JuMP.value.(master.var_stat)
-    sol_ctrl = JuMP.value.(master.var_ctrl)
-    val_lobd = JuMP.objective_value(master.model)
-    val_mobj = master.obj_stat'*sol_stat + master.obj_ctrl'*sol_ctrl
+    @objective(master.model, Min, obj)
+    optimize!(master.model)
+    sol_x = value.(master.x)
+    sol_y = value.(master.y)
+    sol_w = value(master.w)
+    min_obj = objective_value(master.model)
+    val_f = master.f_x'*sol_x + master.f_y'*sol_y
     # get the initial upper bound
-    loss, cut = recourse(sol_stat)
-    val_upbd = loss + val_mobj
-    # loop until the bounds are close
-    while val_upbd - val_lobd > opt_gap
-        # update the loss/recourse approximation
-        JuMP.@constraint(master.model, master.var_loss >= cut.val + cut.vec'*master.var_stat)
-        # calculate the level
-        val_lev = level*val_upbd + (1-level)*val_lobd
-        # build the projection model
-        con_proj = JuMP.@constraint(master.model, expr_obj <= val_lev)
-        JuMP.@objective(master.model, Min, norm(master.var_stat - sol_stat)^2)
-        # find the next iterate
-        JuMP.optimize!(master.model)
-        sol_stat = JuMP.value.(master.var_stat)
-        sol_ctrl = JuMP.value.(master.var_ctrl)
-        val_mobj = master.obj_stat'*sol_stat + master.obj_ctrl'*sol_ctrl
-        # get an updated upper bound
-        loss, cut = recourse(sol_stat)
-        val_upbd = min(val_upbd, loss + val_mobj)
-        # restore the optimization model
-        JuMP.delete(master.model, con_proj)
-        JuMP.@objective(master.model, Min, expr_obj)
-        # get an updated lower bound
-        JuMP.optimize!(master.model)
-        val_lobd = JuMP.objective_value(master.model)
+    val_ϕ, cut = recourse([sol_x, sol_w])
+    max_obj = val_f + val_ϕ
+    # print the starting message
+    if print
+        println(" Start the level bundle method for the master problem...")
     end
-    return MasterSolution(sol_stat, sol_ctrl, val_upbd, val_mobj)
+    iter = 1
+    # loop until the bounds are close
+    while max_obj - min_obj > opt_gap
+        # update the loss/recourse approximation
+        @constraint(master.model, master.ϕ >= cut.b + cut.a'*[master.x, master.w])
+        # calculate the level
+        val_lev = level*max_obj + (1-level)*min_obj
+        # build the projection model
+        con_proj = @constraint(master.model, obj <= val_lev)
+        @objective(master.model, Min, norm(master.x - sol_x)^2 + (master.w - sol_w)^2)
+        # find the next iterate
+        optimize!(master.model)
+        sol_x = value.(master.x)
+        sol_y = value.(master.y)
+        sol_w = value(master.w)
+        val_f = master.f_x'*sol_x + master.f_y'*sol_y
+        # get an updated upper bound
+        val_ϕ, cut = recourse([sol_x, sol_w])
+        max_obj = min(max_obj, val_ϕ + val_f)
+        # restore the optimization model
+        delete(master.model, con_proj)
+        @objective(master.model, Min, obj)
+        # get an updated lower bound
+        optimize!(master.model)
+        min_obj = objective_value(master.model)
+        # print the update if needed
+        if print
+            printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
+                       val_ϕ+val_f, max_obj, min_obj)
+        end
+        iter += 1
+        # check if maximum number of iteration is reached
+        if iter > max_iter
+            if print
+                printfmtln(" The level bundle method does not converge within {} iterations", max_iter)
+            end
+            return MasterSolution(sol_x, sol_y, max_obj, val_f)
+        end
+    end
+    if print
+        printfmtln(" The level bundle method has converged within {} iteration(s)", iter)
+    end
+    return MasterSolution(sol_x, sol_y, max_obj, val_f)
 end
