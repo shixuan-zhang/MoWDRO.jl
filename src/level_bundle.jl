@@ -13,7 +13,7 @@ function solve_master_level(
         print::Bool = false
     )::MasterSolution
     # set the objective expression
-    obj = master.f_x'*master.x + master.f_y'*master.y + master.ϕ
+    obj = master.f_x'*master.x + master.f_y'*master.y + master.ϕ + master.r*master.w
     # add the artificial bound on the Wasserstein auxiliary variable w 
     set_upper_bound(master.w, max_aux)
     # get the initial solution and lower bound
@@ -25,8 +25,9 @@ function solve_master_level(
     min_obj = objective_value(master.model)
     val_f = master.f_x'*sol_x + master.f_y'*sol_y
     # get the initial upper bound
-    val_ϕ, cut = recourse([sol_x, sol_w])
-    max_obj = val_f + val_ϕ
+    val_ϕ, ∇ϕ = recourse([sol_x; sol_w])
+    cut = build_linear_cut([sol_x; sol_w], ∇ϕ, val_ϕ)
+    max_obj = val_f + val_ϕ + master.r*sol_w
     # print the starting message
     if print
         println(" Start the level bundle method for the master problem...")
@@ -35,12 +36,12 @@ function solve_master_level(
     # loop until the bounds are close
     while max_obj - min_obj > opt_gap
         # update the loss/recourse approximation
-        @constraint(master.model, master.ϕ >= cut.b + cut.a'*[master.x, master.w])
+        @constraint(master.model, master.ϕ >= cut.b + cut.a'*[master.x; master.w])
         # calculate the level
         val_lev = level*max_obj + (1-level)*min_obj
         # build the projection model
         con_proj = @constraint(master.model, obj <= val_lev)
-        @objective(master.model, Min, norm(master.x - sol_x)^2 + (master.w - sol_w)^2)
+        @objective(master.model, Min, (master.x - sol_x)'*(master.x - sol_x) + (master.w - sol_w)^2)
         # find the next iterate
         optimize!(master.model)
         sol_x = value.(master.x)
@@ -48,8 +49,9 @@ function solve_master_level(
         sol_w = value(master.w)
         val_f = master.f_x'*sol_x + master.f_y'*sol_y
         # get an updated upper bound
-        val_ϕ, cut = recourse([sol_x, sol_w])
-        max_obj = min(max_obj, val_ϕ + val_f)
+        val_ϕ, ∇ϕ = recourse([sol_x; sol_w])
+        cut = build_linear_cut([sol_x; sol_w], ∇ϕ, val_ϕ)
+        max_obj = min(max_obj, val_ϕ + val_f + master.r*sol_w)
         # restore the optimization model
         delete(master.model, con_proj)
         @objective(master.model, Min, obj)
@@ -59,7 +61,8 @@ function solve_master_level(
         # print the update if needed
         if print
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
-                       val_ϕ+val_f, max_obj, min_obj)
+                       iter, val_ϕ+val_f+master.r*sol_w, max_obj, min_obj)
+            println("DEBUG: w = ", sol_w, ", x = ", sol_x)
         end
         iter += 1
         # check if maximum number of iteration is reached

@@ -23,6 +23,8 @@ struct MasterProblem
     # linear objective coefficient vectors
     f_x::Vector{Float64}
     f_y::Vector{Float64}
+    # Wasserstein radius
+    r::Float64
 end
 
 # structure for the master (first-stage) solution
