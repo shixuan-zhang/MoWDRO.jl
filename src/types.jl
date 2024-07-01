@@ -57,19 +57,44 @@ struct RecourseData
     # bounds for the variables
     min_ξ::Vector{Float64}
     max_ξ::Vector{Float64}
+    min_η::Vector{Float64}
+    max_η::Vector{Float64}
 end
 
-# structure for the Wasserstein (second-stage) recourse optimization model
+# abstract type of recourse problems
+abstract type RecourseProblem end
+
+# structure for Wasserstein (second-stage) recourse optimization problems:
 # max  (1,x)'⋅(Ψ₀(M),Ψ₁(M),…,Ψₙ(M)) - w⋅Ψₙ₊₁(M)
 # s.t. Gⱼ⋅M ≥ 0, ∀ j,
 #      Hₖ⋅M = 0, ∀ k,
 #      (ξ,η,M) ∈ (Relaxed) Second Moment Set.
 # Here, ξ̄ is the given sample of ξ, Ψ₀,…,Ψₙ,Ψₙ₊₁ are affine expressions in M, 
 # where Ψₙ₊₁(M) correspond to the 2-norm term |ξ - ξ̄|² in Wasserstein DRO.
-struct RecourseProblem
+struct WassersteinRecourseProblem <: RecourseProblem
     # recourse problem JuMP model
     model::Model
     # objective coefficients of the augmented state vector (1,x,w)
     Ψ::Vector{AffExpr}
 end
 
+# structure for nominal (second-stage) recourse evaluation problems:
+# max  (1,x)'⋅(Ψ₀(η),Ψ₁(η),…,Ψₙ(η))
+# s.t. (1,η)'⋅G̃ⱼ⋅(1,η) ≥ 0, ∀ j,
+#      (1,η)'⋅H̃ₖ⋅(1,η) = 0, ∀ k,
+# where G̃ⱼ and H̃ₖ are (l+1)×(l+1) matrices, which are induced by Gⱼ and Hₖ with 
+# the given sample vector ξ̄ ∈ Rᵐ.
+struct NominalRecourseProblem <: RecourseProblem
+    # recourse problem JuMP model
+    model::Model
+    # objective coefficients of the standard state vector (1,x)
+    Ψ::Vector{AffExpr}
+end
+
+# structure for simple recourse second-stage problems:
+# max {(1,x)'⋅(Ψ₀(η),Ψ₁(η),…,Ψₙ(η)) | η = η¹,…,ηᵏ}
+# in which case we may denote Ψᵏ := (Ψ₀(ηᵏ),…,Ψₙ(ηᵏ)) as the coefficient vector
+struct SimpleRecourseProblem <: RecourseProblem
+    # recourse piece coefficient vectors
+    Ψ::Vector{Vector{Float64}}
+end
