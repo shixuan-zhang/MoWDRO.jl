@@ -12,7 +12,7 @@ end
 # combine linear cuts from different uncertainty outcomes/realizations
 function combine_linear_cuts(
         cuts::Vector{LinearCut};
-        prob::Vector{Float64} = 0.0
+        prob::Vector{Float64} = Float64[]
     )
     # check if the probability vector is properly supplied
     N = length(cuts)
@@ -27,7 +27,7 @@ end
 
 # evaluate the Wasserstein DRO recourse problems with given augmented state (x,w)
 function eval_Wass_recourse(
-        recourse::Vector{RecourseProblem},
+        recourse::Vector{WassersteinRecourseProblem},
         x_w::Vector{Float64}
     )
     # prepare the array of linear cuts
@@ -36,7 +36,7 @@ function eval_Wass_recourse(
     # loop over the outcomes/realizations of ξ
     for i in 1:N
         # set the linear objective expression
-        @objective(recourse[i].model, Max, [1,x_w]'*recourse[i].Ψ)
+        @objective(recourse[i].model, Max, [1;x_w]'*recourse[i].Ψ)
         # solve the problem
         optimize!(recourse[i].model)
         # check if the solution exists
@@ -44,7 +44,7 @@ function eval_Wass_recourse(
             println(" The recourse evaluation failed!")
         end
         ϕ = objective_value(recourse[i].model)
-        ∇ϕ = [1,x_w]'*value.(recourse[i].Ψ)
+        ∇ϕ = value.(recourse[i].Ψ)[2:end]
         # store the generated linear cut
         push!(cuts, build_linear_cut(x_w, ∇ϕ, ϕ))
     end
@@ -54,8 +54,8 @@ end
 
 # evaluate the nominal SO recourse problems with given state x
 function eval_nom_recourse(
-        recourse::RecourseProblem,
+        recourse::Vector{NominalRecourseProblem},
         x::Vector{Float64}
     )
-    
+    # TODO: complete the evaluation method
 end

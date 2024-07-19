@@ -5,13 +5,13 @@
 
 function solve_master_level(
         master::MasterProblem,
-        recourse::Function;
+        recourse::Vector{T};
         max_iter::Int = NUM_MAX_ITER,
         opt_gap::Float64 = VAL_TOL,
         max_aux::Float64 = VAL_INF,
         level::Float64 = 0.5,
         print::Bool = false
-    )::MasterSolution
+    )::MasterSolution where T <: RecourseProblem
     # set the objective expression
     obj = master.f_x'*master.x + master.f_y'*master.y + master.ϕ + master.r*master.w
     # add the artificial bound on the Wasserstein auxiliary variable w 
@@ -25,9 +25,16 @@ function solve_master_level(
     min_obj = objective_value(master.model)
     val_f = master.f_x'*sol_x + master.f_y'*sol_y
     # get the initial upper bound
-    val_ϕ, ∇ϕ = recourse([sol_x; sol_w])
-    cut = build_linear_cut([sol_x; sol_w], ∇ϕ, val_ϕ)
-    max_obj = val_f + val_ϕ + master.r*sol_w
+    cut = LinearCut(Float64[], 0.0)
+    if T == WassersteinRecourseProblem
+        cut = eval_Wass_recourse(recourse, [sol_x;sol_w])
+    elseif T == NominalRecourseProblem
+        cut = eval_nom_recourse(recourse, sol_x)
+    else
+        error("Unsupported recourse problem type!")
+    end
+    val_ϕ = cut.a'*[sol_x; sol_w] + cut.b
+    max_obj = val_ϕ + val_f + master.r*sol_w
     # print the starting message
     if print
         println(" Start the level bundle method for the master problem...")
@@ -49,9 +56,16 @@ function solve_master_level(
         sol_w = value(master.w)
         val_f = master.f_x'*sol_x + master.f_y'*sol_y
         # get an updated upper bound
-        val_ϕ, ∇ϕ = recourse([sol_x; sol_w])
-        cut = build_linear_cut([sol_x; sol_w], ∇ϕ, val_ϕ)
-        max_obj = min(max_obj, val_ϕ + val_f + master.r*sol_w)
+        cut = LinearCut(Float64[], 0.0)
+        if T == WassersteinRecourseProblem
+            cut = eval_Wass_recourse(recourse, [sol_x;sol_w])
+        elseif T == NominalRecourseProblem
+            cut = eval_nom_recourse(recourse, sol_x)
+        else
+            error("Unsupported recourse problem type!")
+        end
+        val_ϕ = cut.a'*[sol_x; sol_w] + cut.b
+        max_obj = min(max_obj, val_f + val_ϕ + master.r*sol_w)
         # restore the optimization model
         delete(master.model, con_proj)
         @objective(master.model, Min, obj)
@@ -62,7 +76,6 @@ function solve_master_level(
         if print
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
                        iter, val_ϕ+val_f+master.r*sol_w, max_obj, min_obj)
-            println("DEBUG: w = ", sol_w, ", x = ", sol_x)
         end
         iter += 1
         # check if maximum number of iteration is reached

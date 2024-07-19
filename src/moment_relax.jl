@@ -4,7 +4,7 @@
 function build_semidefinite_relax(
         sample::Vector{Float64},
         recourse::RecourseData;
-        solve::Module = DEFAULT_SDP
+        solver::Module = DEFAULT_SDP
     )::RecourseProblem
     # declare the JuMP model
     model = Model(solver.Optimizer)
@@ -12,10 +12,10 @@ function build_semidefinite_relax(
     dim_M = 1 + recourse.dim_ξ + recourse.dim_η
     M = @variable(model, [1:dim_M,1:dim_M], PSD, base_name="M")
     # fix the degree 0 (constant) part of M
-    fix_value(M[1,1], 1.0)
+    fix(M[1,1], 1.0)
     # alias the degree 1 part of M to the variables ξ and η
     ξ = M[1,2:(recourse.dim_ξ+1)]
-    η = M[1,(recourse_ξ+2):end]
+    η = M[1,(recourse.dim_ξ+2):end]
     # add bounds on ξ and η
     for i in 1:recourse.dim_ξ
         if recourse.min_ξ[i] > -Inf
@@ -35,20 +35,20 @@ function build_semidefinite_relax(
     end
     # impose other constraints on the pseudo moment M
     for G in recourse.G
-        @constraint(model, M*G >= 0)
+        @constraint(model, tr(M*G) >= 0)
     end
     for H in recourse.H
-        @constraint(model, M*H == 0)
+        @constraint(model, tr(M*H) == 0)
     end
     # obtain the objective expressions Ψ(M)
     Ψ = AffExpr[]
     for F in recourse.F
-        push!(Ψ, M*F)
+        push!(Ψ, tr(M*F))
     end
     # add the augmented term -|ξ - ξ̄|² = -|ξ|² + 2ξ'⋅ξ̄ - |ξ̄|²
     norm2_ξ = sum([M[i,i] for i in 2:(recourse.dim_η+1)])
     push!(Ψ, -norm2_ξ + 2*ξ'*sample - sample'*sample)
-    return RecourseProblem(model, Ψ)
+    return WassersteinRecourseProblem(model, Ψ)
 end
 
 
