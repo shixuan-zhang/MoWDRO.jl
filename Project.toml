@@ -5,10 +5,14 @@ version = "0.1.0"
 
 [deps]
 ECOS = "e2685f51-7e38-5353-a97d-a921fd2c8199"
+Formatting = "59287772-0a20-5a39-b81b-1366585eb4c0"
 HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SDPA = "b9a10b5b-afa4-512f-a053-bb3d8080febc"
+SemialgebraicSets = "8e049039-38e8-557d-ae3a-bc521ccf6204"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 julia = "1.6.7"
