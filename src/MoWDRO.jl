@@ -3,8 +3,9 @@ module MoWDRO
 
 # import basic mathematics and statistics modules
 using LinearAlgebra, Random, Statistics
-using Formatting
+using DynamicPolynomials, SumOfSquares
 using JuMP
+using Formatting
 # set default solvers
 import HiGHS, SDPA, ECOS
 const DEFAULT_LP = HiGHS
@@ -12,10 +13,9 @@ const DEFAULT_QCP = ECOS
 const DEFAULT_SDP = SDPA
 
 # export types and methods for application programming interface
-export MasterProblem, MasterSolution
-export RecourseData, WassersteinRecourseProblem, NominalRecourseProblem, SimpleRecourseProblem
+export MainProblem, MainSolution
+export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
 export solve_master_level, eval_Wass_recourse, eval_nom_recourse
-export build_semidefinite_relax, build_linear_relax
 
 # define module-wide shared parameters
 const NUM_DIG = 8

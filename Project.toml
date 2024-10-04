@@ -4,6 +4,7 @@ authors = ["Shixuan Zhang"]
 version = "0.1.0"
 
 [deps]
+DynamicPolynomials = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
 ECOS = "e2685f51-7e38-5353-a97d-a921fd2c8199"
 Formatting = "59287772-0a20-5a39-b81b-1366585eb4c0"
 HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"

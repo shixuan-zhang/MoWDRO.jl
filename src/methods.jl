@@ -1,17 +1,10 @@
 ## Basic methods for data types conversion and mathematical functions
 
-# build a linear cut from the current state variable and solution information
-function build_linear_cut(
-        x::Vector{Float64},
-        ∇ϕ::Vector{Float64},
-        ϕ::Float64
-    )
-    return LinearCut(∇ϕ, ϕ-∇ϕ'*x)
-end
-
-# combine linear cuts from different uncertainty outcomes/realizations
+# combine linear cuts of the form:
+# cut[1] + cut[2:end]'*x
+# from different uncertainty outcomes/realizations
 function combine_linear_cuts(
-        cuts::Vector{LinearCut};
+        cuts::Vector{Vector{Float64}};
         prob::Vector{Float64} = Float64[]
     )
     # check if the probability vector is properly supplied
@@ -20,42 +13,62 @@ function combine_linear_cuts(
         prob = ones(N) ./ N
     end
     # aggregate the cuts
-    a = sum([cuts[i].a .* prob[i] for i in 1:N]) ./ N
-    b = sum([cuts[i].b * prob[i] for i in 1:N]) ./ N
-    return LinearCut(a, b)
+    return sum([cuts[i] .* prob[i] for i in 1:N]) ./ N
 end
 
-# evaluate the Wasserstein DRO recourse problems with given augmented state (x,w)
-function eval_Wass_recourse(
-        recourse::Vector{WassersteinRecourseProblem},
-        x_w::Vector{Float64}
+
+# evaluate the nominal polynomial loss function with the given state
+function eval_nominal(
+        loss::SamplePolynomialLoss,
+        state::Vector{Float64},
+        samples::Vector{Vector{Float64}}
     )
-    # prepare the array of linear cuts
-    N = length(recourse)
-    cuts = LinearCut[]
-    # loop over the outcomes/realizations of ξ
-    for i in 1:N
-        # set the linear objective expression
-        @objective(recourse[i].model, Max, [1;x_w]'*recourse[i].Ψ)
-        # solve the problem
-        optimize!(recourse[i].model)
-        # check if the solution exists
-        if !is_solved_and_feasible(recourse[i].model)
-            println(" The recourse evaluation failed!")
-        end
-        ϕ = objective_value(recourse[i].model)
-        ∇ϕ = value.(recourse[i].Ψ)[2:end]
-        # store the generated linear cut
-        push!(cuts, build_linear_cut(x_w, ∇ϕ, ϕ))
+    N = length(samples)
+    cuts = Vector{Float64}[]
+    # alias the state vector
+    x̄ = state
+    # loop over all samples for the loss function evaluation
+    for i = 1:N # TODO: parallelize this for-loop
+        ξ̂ = samples[i]
+        v̂ = convert(Float64,subs(loss.F,loss.x=>x̄,loss.ξ=>ξ̂))
+        ĝ = convert.(Float64,subs.(loss.∇ₓF,loss.x=>x̄,loss.ξ=>ξ̂))
+        # store the cut
+        push!(cuts, [v̂-ĝ'*x̄;ĝ])
     end
-    # return the aggregate cut to the master problem
+    # return the aggregate cut
     return combine_linear_cuts(cuts)
 end
 
-# evaluate the nominal SO recourse problems with given state x
-function eval_nom_recourse(
-        recourse::Vector{NominalRecourseProblem},
-        x::Vector{Float64}
+# evaluate the nominal stochastic linear recourse problems with given state x
+function eval_nominal(
+        recourse::SampleLinearRecourse,
+        state::Vector{Float64},
+        samples::Vector{Vector{Float64}}
     )
-    # TODO: complete the evaluation method
+    N = length(samples)
+    cuts = Vector{Float64}[]
+    # loop over all samples for the linear recourse problem
+    for i = 1:N # TODO: parallelize this for-loop
+        ξ̂ = samples[i]
+        # retrieve the linear objective function at the sample
+        C = convert.(Float64,subs.(recourse.C,recourse.ξ=>ξ̂))
+        c = C'*[1;state]
+        # retrieve the linear constraints at the sample
+        A = convert.(Float64,subs.(recourse.A,recourse.ξ=>ξ̂))
+        b = convert.(Float64,subs.(recourse.b,recourse.ξ=>ξ̂))
+        # formulate a JuMP linear optimization model
+        M = JuMP.Model(DEFAULT_LP.Optimizer)
+        # define the recourse variables and constraints
+        @variable(M, y[1:length(c)])
+        @constraint(M, A*y - b >= 0)
+        @objective(M, Max, c'*y)
+        # solve the recourse model
+        optimize!(M)
+        # retrieve the recourse solutions
+        ȳ = value.(y)
+        # store the cut
+        push!(cuts, C*[1;ȳ])
+    end
+    # return the aggregate cut
+    return combine_linear_cuts(cuts)
 end
