@@ -1,32 +1,33 @@
-# Level bundle method for solving the master problem of the form
-# min  f_x'⋅x + f_y'⋅y + ϕ(x,w)
-# s.t. (x,y) ∈ Feasible Set, w ≥ 0.
+# Level bundle method for solving the main problem of the form
+# min  f_x'⋅x + f_u'⋅u + ϕ(x,w)
+# s.t. (x,u) ∈ Feasible Set, w ≥ 0.
 # Artificial upper bound on w is needed for convergence.
 
-function solve_master_level(
-        master::MasterProblem,
-        recourse::Vector{T};
+function solve_main_level(
+        main::MainProblem,
+        subproblem::T,
+        wassinfo::WassInfo = WassInfo(.0,2);
         max_iter::Int = NUM_MAX_ITER,
         opt_gap::Float64 = VAL_TOL,
         max_aux::Float64 = VAL_INF,
         level::Float64 = 0.5,
         print::Bool = false
-    )::MasterSolution where T <: RecourseProblem
+    )::MainSolution where T <: SampleSubproblem
     # set the objective expression
-    obj = master.f_x'*master.x + master.f_y'*master.y + master.ϕ + master.r*master.w
+    obj = main.f_x'*main.x + main.f_y'*main.y + main.ϕ + main.r*main.w
     # add the artificial bound on the Wasserstein auxiliary variable w 
-    set_upper_bound(master.w, max_aux)
+    set_upper_bound(main.w, max_aux)
     # get the initial solution and lower bound
-    @objective(master.model, Min, obj)
-    optimize!(master.model)
-    sol_x = value.(master.x)
-    sol_y = value.(master.y)
-    sol_w = value(master.w)
-    min_obj = objective_value(master.model)
-    val_f = master.f_x'*sol_x + master.f_y'*sol_y
+    @objective(main.model, Min, obj)
+    optimize!(main.model)
+    sol_x = value.(main.x)
+    sol_y = value.(main.y)
+    sol_w = value(main.w)
+    min_obj = objective_value(main.model)
+    val_f = main.f_x'*sol_x + main.f_y'*sol_y
     # get the initial upper bound
     cut = LinearCut(Float64[], 0.0)
-    if T == WassersteinRecourseProblem
+    if T == WassersteinRecourseProblem # FIXME: to be fixed here
         cut = eval_Wass_recourse(recourse, [sol_x;sol_w])
     elseif T == NominalRecourseProblem
         cut = eval_nom_recourse(recourse, sol_x)
@@ -34,27 +35,27 @@ function solve_master_level(
         error("Unsupported recourse problem type!")
     end
     val_ϕ = cut.a'*[sol_x; sol_w] + cut.b
-    max_obj = val_ϕ + val_f + master.r*sol_w
+    max_obj = val_ϕ + val_f + main.r*sol_w
     # print the starting message
     if print
-        println(" Start the level bundle method for the master problem...")
+        println(" Start the level bundle method for the main problem...")
     end
     iter = 1
     # loop until the bounds are close
     while max_obj - min_obj > opt_gap
         # update the loss/recourse approximation
-        @constraint(master.model, master.ϕ >= cut.b + cut.a'*[master.x; master.w])
+        @constraint(main.model, main.ϕ >= cut.b + cut.a'*[main.x; main.w])
         # calculate the level
         val_lev = level*max_obj + (1-level)*min_obj
         # build the projection model
-        con_proj = @constraint(master.model, obj <= val_lev)
-        @objective(master.model, Min, (master.x - sol_x)'*(master.x - sol_x) + (master.w - sol_w)^2)
+        con_proj = @constraint(main.model, obj <= val_lev)
+        @objective(main.model, Min, (main.x - sol_x)'*(main.x - sol_x) + (main.w - sol_w)^2)
         # find the next iterate
-        optimize!(master.model)
-        sol_x = value.(master.x)
-        sol_y = value.(master.y)
-        sol_w = value(master.w)
-        val_f = master.f_x'*sol_x + master.f_y'*sol_y
+        optimize!(main.model)
+        sol_x = value.(main.x)
+        sol_y = value.(main.y)
+        sol_w = value(main.w)
+        val_f = main.f_x'*sol_x + main.f_y'*sol_y
         # get an updated upper bound
         cut = LinearCut(Float64[], 0.0)
         if T == WassersteinRecourseProblem
@@ -65,17 +66,17 @@ function solve_master_level(
             error("Unsupported recourse problem type!")
         end
         val_ϕ = cut.a'*[sol_x; sol_w] + cut.b
-        max_obj = min(max_obj, val_f + val_ϕ + master.r*sol_w)
+        max_obj = min(max_obj, val_f + val_ϕ + main.r*sol_w)
         # restore the optimization model
-        delete(master.model, con_proj)
-        @objective(master.model, Min, obj)
+        delete(main.model, con_proj)
+        @objective(main.model, Min, obj)
         # get an updated lower bound
-        optimize!(master.model)
-        min_obj = objective_value(master.model)
+        optimize!(main.model)
+        min_obj = objective_value(main.model)
         # print the update if needed
         if print
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
-                       iter, val_ϕ+val_f+master.r*sol_w, max_obj, min_obj)
+                       iter, val_ϕ+val_f+main.r*sol_w, max_obj, min_obj)
         end
         iter += 1
         # check if maximum number of iteration is reached

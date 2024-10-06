@@ -15,12 +15,13 @@ const DEFAULT_SDP = SDPA
 # export types and methods for application programming interface
 export MainProblem, MainSolution
 export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
-export solve_master_level, eval_Wass_recourse, eval_nom_recourse
+export solve_main_level, eval_nominal, eval_moment_Wass
 
 # define module-wide shared parameters
 const NUM_DIG = 8
 const VAL_TOL = 1.0e-6
 const VAL_INF = 1.0e9
+const VAL_INIT_AUX = 1.0e2
 const NUM_MAX_ITER = 1000
 
 # define basic types

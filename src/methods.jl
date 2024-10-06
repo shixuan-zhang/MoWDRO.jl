@@ -1,7 +1,7 @@
 ## Basic methods for data types conversion and mathematical functions
 
 # combine linear cuts of the form:
-# cut[1] + cut[2:end]'*x
+# cut'*[1;x] = cut[1] + cut[2:end]'*x
 # from different uncertainty outcomes/realizations
 function combine_linear_cuts(
         cuts::Vector{Vector{Float64}};
