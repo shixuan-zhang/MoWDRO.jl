@@ -9,18 +9,25 @@ function eval_moment_Wass(
         wassinfo::WassInfo;
         relaxdeg::Int = 0
     )
-    N = length(recourse)
+    N = length(samples)
     cuts = Vector{Float64}[]
-    # set the loss function at the given state
-    f = subs(loss.F,loss.x=>x̄)
-    # set the default relaxation degree
-    if relaxdeg <= 0
-        relax_deg = max(maxdegree(f),wassinfo.p)
-    end
     # alias the augmented state
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
-    # loop over all samples for the linear recourse moment relaxation
+    # set the loss function at the given state
+    f = subs(loss.F, loss.x=>x̄)
+    println("The current state is ", x̄)
+    println("The substituted loss function is ", f)
+    println("The domain is ", loss.Ξ)
+    # set the default relaxation degree
+    if relaxdeg <= 0
+        relax_deg = max(maxdegree(f),wassinfo.p)+1
+        println("The relxation degree is ", relax_deg)
+    end
+    # define the Schmüdgen certificate for moment relaxation
+    ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
+    certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
+    # loop over all samples for the loss function moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
         d = length(ξ̂)
@@ -30,8 +37,9 @@ function eval_moment_Wass(
         model = SOSModel(DEFAULT_SDP.Optimizer)
         @variable(model, optval)
         @objective(model, Min, optval)
-        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ)
+        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate)
         # solve the SOS model and extract the (pseudo-)moments/measure
+        println("The model is ", model)
         optimize!(model)
         μ = moments(constr)
         # retrieve the pseudo-expectations for the polynomials
@@ -54,7 +62,7 @@ function eval_moment_Wass(
         wassinfo::WassInfo;
         relaxdeg::Int = 0
     )
-    N = length(recourse)
+    N = length(samples)
     cuts = Vector{Float64}[]
     # set the default relaxation degree
     if relaxdeg <= 0

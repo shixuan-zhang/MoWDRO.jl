@@ -7,13 +7,13 @@ using DynamicPolynomials, SumOfSquares
 using JuMP
 using Formatting
 # set default solvers
-import HiGHS, SDPA, ECOS
+import HiGHS, SDPA, ECOS, CSDP
 const DEFAULT_LP = HiGHS
 const DEFAULT_QCP = ECOS
-const DEFAULT_SDP = SDPA
+const DEFAULT_SDP = CSDP #SDPA
 
 # export types and methods for application programming interface
-export MainProblem, MainSolution
+export MainProblem, MainSolution, WassInfo
 export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
 export solve_main_level, eval_nominal, eval_moment_Wass
 
@@ -29,6 +29,8 @@ include("types.jl")
 # define the main methods
 include("methods.jl")
 
+# import alternative certificates
+include("certificates.jl")
 
 # include algorithms and relaxations
 include("moment_relax.jl")
