@@ -21,8 +21,8 @@ function eval_moment_Wass(
     println("The domain is ", loss.Ξ)
     # set the default relaxation degree
     if relaxdeg <= 0
-        relax_deg = max(maxdegree(f),wassinfo.p)+1
-        println("The relxation degree is ", relax_deg)
+        relaxdeg = max(maxdegree(f),wassinfo.p)
+        println("The relxation degree is ", relaxdeg)
     end
     # define the Schmüdgen certificate for moment relaxation
     ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
@@ -37,7 +37,7 @@ function eval_moment_Wass(
         model = SOSModel(DEFAULT_SDP.Optimizer)
         @variable(model, optval)
         @objective(model, Min, optval)
-        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate)
+        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate, maxdegree=relaxdeg)
         # solve the SOS model and extract the (pseudo-)moments/measure
         println("The model is ", model)
         optimize!(model)
@@ -45,7 +45,7 @@ function eval_moment_Wass(
         # retrieve the pseudo-expectations for the polynomials
         v̂ = expectation(μ,f)
         p̂ = expectation(μ,p)
-        ĝ = map(m->expectation(μ,m), loss.∇ₓF)
+        ĝ = map(m->expectation(μ,m), subs.(loss.∇ₓF,loss.x=>x̄))
         # store the cut
         push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
     end
