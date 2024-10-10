@@ -26,9 +26,6 @@ function solve_main_level(
     dim_x = length(main.x)
     # set the objective expression
     obj = main.f_x'*main.x + main.f_u'*main.u + main.ϕ 
-    if flag_Wass
-        obj += wassinfo.r*main.w
-    end
     # add the artificial bound on the Wasserstein auxiliary variable w 
     set_upper_bound(main.w, max_aux)
     # get the initial solution and lower bound
@@ -46,15 +43,22 @@ function solve_main_level(
     # get the initial upper bound
     cut = zeros(dim_x+2)
     if flag_Wass
-        cut = eval_moment_Wass(subproblem, samples, [sol_x;sol_w], wassinfo)
+        cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo)
     else
-        cut[1:dim_x+1] = eval_nominal(subproblem, samples, sol_x)
+        cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
     end
     val_ϕ = cut'*[1;sol_x;sol_w]
     max_obj = val_ϕ + val_f
+    # initialize the return values
+    opt_x = sol_x
+    opt_u = sol_u
+    opt_f = val_f
+    opt_ϕ = val_ϕ
     # print the starting message
     if print
         println(" Start the level bundle method for the main problem...")
+        println(" The initial lower bound = ", min_obj)
+        println(" The initial upper bound = ", max_obj)
     end
     iter = 1
     # loop until the bounds are close
@@ -82,12 +86,19 @@ function solve_main_level(
         # get an updated upper bound
         cut = zeros(dim_x+2)
         if flag_Wass
-            cut = eval_moment_Wass(subproblem, samples, [sol_x;sol_w], wassinfo)
+            cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo)
         else
-            cut[1:dim_x+1] = eval_nominal(subproblem, samples, sol_x)
+            cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
         end
         val_ϕ = cut'*[1;sol_x;sol_w]
-        max_obj = min(max_obj, val_ϕ + val_f)
+        # check if a better solution is encountered
+        if val_ϕ + val_f < max_obj
+            max_obj = val_ϕ + val_f
+            opt_x = sol_x
+            opt_u = sol_u
+            opt_f = val_f
+            opt_ϕ = val_ϕ
+        end
         # restore the optimization model
         delete(main.model, con_proj)
         @objective(main.model, Min, obj)
@@ -105,11 +116,11 @@ function solve_main_level(
             if print
                 printfmtln(" The level bundle method does not converge within {} iterations", max_iter)
             end
-            return MainSolution(sol_x, sol_u, val_f, val_ϕ)
+            return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
         end
     end
     if print
         printfmtln(" The level bundle method has converged within {} iteration(s)", iter)
     end
-    return MainSolution(sol_x, sol_u, val_f, val_ϕ)
+    return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
 end

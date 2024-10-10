@@ -4,8 +4,8 @@
 # robust polynomial loss function with a given augmented state (x,w)
 function eval_moment_Wass(
         loss::SamplePolynomialLoss,
-        samples::Vector{Vector{Float64}},
         augstate::Vector{Float64},
+        samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0
     )
@@ -16,13 +16,9 @@ function eval_moment_Wass(
     w̄ = augstate[end]
     # set the loss function at the given state
     f = subs(loss.F, loss.x=>x̄)
-    println("The current state is ", x̄)
-    println("The substituted loss function is ", f)
-    println("The domain is ", loss.Ξ)
     # set the default relaxation degree
     if relaxdeg <= 0
         relaxdeg = max(maxdegree(f),wassinfo.p)
-        println("The relxation degree is ", relaxdeg)
     end
     # define the Schmüdgen certificate for moment relaxation
     ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
@@ -34,12 +30,11 @@ function eval_moment_Wass(
         # define the polynomial objective
         p = sum((loss.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
         # define the SOS optimization model
-        model = SOSModel(DEFAULT_SDP.Optimizer)
+        model = SOSModel(DEFAULT_SDP)
         @variable(model, optval)
         @objective(model, Min, optval)
         @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate, maxdegree=relaxdeg)
         # solve the SOS model and extract the (pseudo-)moments/measure
-        println("The model is ", model)
         optimize!(model)
         μ = moments(constr)
         # retrieve the pseudo-expectations for the polynomials
@@ -57,8 +52,8 @@ end
 # robust linear recourse problem with a given augmented state (x,w)
 function eval_moment_Wass(
         recourse::SampleLinearRecourse,
-        samples::Vector{Vector{Float64}},
         augstate::Vector{Float64},
+        samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0
     )
@@ -81,7 +76,8 @@ function eval_moment_Wass(
         # define the semi-algebraic set
         S = intersection(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
         # define the SOS optimization model
-        model = SOSModel(DEFAULT_SDP.Optimizer)
+        model = SOSModel(DEFAULT_SDP)
+        set_silent(model)
         @variable(model, optval)
         @objective(model, Min, optval)
         @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)

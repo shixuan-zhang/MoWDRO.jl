@@ -7,10 +7,10 @@ using DynamicPolynomials, SumOfSquares
 using JuMP
 using Formatting
 # set default solvers
-import HiGHS, SDPA, ECOS, CSDP
-const DEFAULT_LP = HiGHS
-const DEFAULT_QCP = ECOS
-const DEFAULT_SDP = CSDP #SDPA
+import HiGHS, ECOS, CSDP 
+const DEFAULT_LP = optimizer_with_attributes(HiGHS.Optimizer, MOI.Silent() => true)
+const DEFAULT_QCP = optimizer_with_attributes(ECOS.Optimizer, MOI.Silent() => true)
+const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true)
 
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo
