@@ -11,10 +11,10 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_VAR = 2
-const NUM_FAC = 3
+const NUM_VAR = 5
+const NUM_FAC = 10
 const DEG_LOSS = 2
-const NUM_SAMPLE = 5
+const NUM_SAMPLE = 20 
 const WASS_INFO = [WassInfo(0.0,2),
                    WassInfo(1e-2,2),
                    WassInfo(2e-2,2),
