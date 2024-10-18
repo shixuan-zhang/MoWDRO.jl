@@ -1,6 +1,6 @@
-# numerical example for a portfolio management problem where
-# F(x,ξ) := C₁(ξᵀx) + C₂(ξᵀx)² + ⋯ + Cₖ(ξᵀx)ᵏ, 
-# x ∈ [0,1]ⁿ, ∑ᵢxᵢ = 1, ξ = Proj(D⋅η,[0,1]ⁿ), 
+# numerical example for a portfolio management problem defined by
+# min fₓᵀx + E[F(x,ξ)], x ∈ [0,1]ⁿ, ∑ᵢxᵢ = 1, where fₓ ∈ [-1,1]ⁿ, 
+# and F(x,ξ) := C₁(ξᵀx) + C₂(ξᵀx)² + ⋯ + Cₖ(ξᵀx)ᵏ, ξ = Proj(D⋅η,[0,1]ⁿ), 
 # η ∼ Uniform(0,1)ᵐ, D ∈ Mat(n,m) with normalized columns,
 # and C₂,…,Cₖ are nonnegative (C₁ may be negative) so F is convex in x for any ξ.
 
@@ -53,7 +53,7 @@ function experiment_portfolio(
     samples = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:N])
     # randomly generate the linear objective function if not supplied
     if length(f_x) != n
-        f_x = rand(n) .* 2 .- 1
+        f_x = rand(n)
     end
     # define the loss function
     @polyvar x[1:n] ξ[1:n]
