@@ -10,6 +10,7 @@ function test_moment_relax()
     f = -x[1] + x[1]^2
     X = @set x[1] >= 0 && x[2] >= 0 && x[1] <= 1 && x[2] <= 1
     model = SOSModel(CSDP.Optimizer)
+    set_silent(model)
     @variable(model, v)
     @objective(model, Min, v)
     ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
