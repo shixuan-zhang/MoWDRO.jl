@@ -39,7 +39,7 @@ end
 abstract type SampleSubproblem end
 
 # structure for (second-stage) recourse linear optimization subproblem
-# F(x,ξ) := max  (1,x₁,…,xₙ)'⋅C(ξ)⋅(1,y₁,…,yₘ)
+# F(x,ξ) := max  (1,x₁,…,xₙ)ᵀ⋅C(ξ)⋅(1,y₁,…,yₘ)
 #           s.t. A(ξ)y-b(ξ) ≥ 0,
 # ξ ∈ Ξ.
 # Here, ξ is the uncertainty vector, y is the recourse decision,

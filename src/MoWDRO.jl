@@ -3,14 +3,13 @@ module MoWDRO
 
 # import basic mathematics and statistics modules
 using LinearAlgebra, Random, Statistics
-using DynamicPolynomials, SumOfSquares
+using DynamicPolynomials, SumOfSquares, SemialgebraicSets
 using JuMP
-using Formatting
+using Format
 # set default solvers
-import HiGHS, ECOS, CSDP 
+import HiGHS, DSDP 
 const DEFAULT_LP = optimizer_with_attributes(HiGHS.Optimizer, MOI.Silent() => true)
-const DEFAULT_QCP = optimizer_with_attributes(ECOS.Optimizer, MOI.Silent() => true)
-const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true)
+const DEFAULT_SDP = optimizer_with_attributes(DSDP.Optimizer, MOI.Silent() => true)
 
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo

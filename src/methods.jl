@@ -57,17 +57,21 @@ function eval_nominal(
         A = convert.(Float64,subs.(recourse.A,recourse.ξ=>ξ̂))
         b = convert.(Float64,subs.(recourse.b,recourse.ξ=>ξ̂))
         # formulate a JuMP linear optimization model
-        M = JuMP.Model(DEFAULT_LP.Optimizer)
+        M = JuMP.Model(DEFAULT_LP)
         # define the recourse variables and constraints
-        @variable(M, y[1:length(c)])
+        @variable(M, y[1:length(c)-1])
         @constraint(M, A*y - b >= 0)
-        @objective(M, Max, c'*y)
+        @objective(M, Max, c'*[1;y])
         # solve the recourse model
         optimize!(M)
-        # retrieve the recourse solutions
-        ȳ = value.(y)
-        # store the cut
-        push!(cuts, C*[1;ȳ])
+        if is_solved_and_feasible(M)
+            # retrieve the recourse solutions
+            ȳ = value.(y)
+            # store the cut
+            push!(cuts, C*[1;ȳ])
+        else
+            error("The nominal evaluation has failed with status: ", termination_status(M))
+        end
     end
     # return the aggregate cut
     return combine_linear_cuts(cuts)

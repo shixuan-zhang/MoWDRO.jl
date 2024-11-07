@@ -28,6 +28,8 @@ function solve_main_level(
     obj = main.f_x'*main.x + main.f_u'*main.u + main.ϕ 
     # add the artificial bound on the Wasserstein auxiliary variable w 
     set_upper_bound(main.w, max_aux)
+    # add the artificial bound on the recourse auxiliary variable ϕ
+    set_lower_bound(main.ϕ, -max_aux)
     # get the initial solution and lower bound
     @objective(main.model, Min, obj)
     optimize!(main.model)

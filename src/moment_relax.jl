@@ -61,7 +61,7 @@ function eval_moment_Wass(
     cuts = Vector{Float64}[]
     # set the default relaxation degree
     if relaxdeg <= 0
-        relax_deg = 4 # TODO: change it to be consistent with degrees of A, b, C, and Ξ
+        relaxdeg = 4 # TODO: change it to be consistent with degrees of A, b, C, and Ξ
     end
     # alias the augmented state
     x̄ = augstate[1:end-1]
@@ -74,7 +74,7 @@ function eval_moment_Wass(
         p = sum((recourse.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
         f = [1;x̄]'*recourse.C*[1;recourse.y] - w̄*p
         # define the semi-algebraic set
-        S = intersection(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
+        S = intersect(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
         # define the SOS optimization model
         model = SOSModel(DEFAULT_SDP)
         set_silent(model)
@@ -83,13 +83,17 @@ function eval_moment_Wass(
         @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
-        μ = moments(constr)
-        # retrieve the pseudo-expectations for the polynomials
-        Ĉ = map(m->expectation(μ,m), recourse.C)
-        ŷ = map(m->expectation(μ,m), recourse.y)
-        p̂ = map(m->expectation(μ,m), p)
-        # store the cut
-        push!(cuts, [Ĉ*[1;ŷ];wassinfo.r-p̂])
+        if is_solved_and_feasible(model)
+            μ = moments(constr)
+            # retrieve the pseudo-expectations for the polynomials
+            Ĉ = map(m->expectation(μ,m), recourse.C)
+            ŷ = map(m->expectation(μ,m), recourse.y)
+            p̂ = expectation(μ,p)
+            # store the cut
+            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r-p̂])
+        else
+            error("The moment relaxation has failed with status: ", termination_status(model))
+        end
     end
     # return the aggregate cut to the main problem
     return combine_linear_cuts(cuts)
