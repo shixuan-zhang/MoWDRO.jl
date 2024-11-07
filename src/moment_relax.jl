@@ -61,7 +61,17 @@ function eval_moment_Wass(
     cuts = Vector{Float64}[]
     # set the default relaxation degree
     if relaxdeg <= 0
-        relaxdeg = 4 # TODO: change it to be consistent with degrees of A, b, C, and Ξ
+        deg_A = maximum(maxdegree.(recourse.A))
+        deg_C = maximum(maxdegree.(recourse.C)) + 1
+        deg_b = maximum(maxdegree.(recourse.b))
+        deg_Ξ = 0
+        if recourse.Ξ.V != FullSpace()
+            deg_Ξ = maximum([maxdegree.(recourse.Ξ.p);maxdegree(recourse.Ξ.V.I.p)])
+        else
+            deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
+        end
+        relaxdeg = maximum([deg_A, deg_b, deg_C, deg_Ξ, wassinfo.p, 4])
+        println("The moment relaxation degree is set to ", relaxdeg)
     end
     # alias the augmented state
     x̄ = augstate[1:end-1]

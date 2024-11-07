@@ -72,7 +72,7 @@ function experiment_assembly(
     # ξᵢ represents qᵢ, i = 1,…,m, and ξⱼ₊ₘ represents sⱼ, j = 1,…,n
     @polyvar x[1:n] ξ[1:m+n] y[1:n+m]
     C = [zeros(n+1)' -ξ[1:m]'; zeros(n) -I zeros(n,m)]
-    A = [I zeros(n,m); P' I; zeros(m,n) I]
+    A = [I zeros(n,m); P' I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
     b = [ξ[m+1:m+n]; r; zeros(m)]
     Ξ = basic_semialgebraic_set(FullSpace(), 
                                 [[ξ[i] for i in 1:m+n];
