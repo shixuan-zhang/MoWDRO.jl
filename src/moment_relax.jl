@@ -55,7 +55,8 @@ function eval_moment_Wass(
         augstate::Vector{Float64},
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
-        relaxdeg::Int = 0
+        relaxdeg::Int = 0,
+        flag_Schmüdgen = false
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -76,6 +77,11 @@ function eval_moment_Wass(
     # alias the augmented state
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
+    # define the Schmüdgen type certificate
+    if flag_Schmüdgen
+        ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
+        certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
+    end
     # loop over all samples for the linear recourse moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
@@ -87,10 +93,13 @@ function eval_moment_Wass(
         S = intersect(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
         # define the SOS optimization model
         model = SOSModel(DEFAULT_SDP)
-        set_silent(model)
         @variable(model, optval)
         @objective(model, Min, optval)
-        @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)
+        if flag_Schmüdgen
+            @constraint(model, constr, optval >= f, domain=S, certificate=certificate, maxdegree=relaxdeg)
+        else
+            @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)
+        end
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
         if is_solved_and_feasible(model)
