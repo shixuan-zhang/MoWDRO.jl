@@ -31,12 +31,12 @@ const PART_COST_MIN = 2.0
 const SALVAGE_MAX = 2.0
 const DEMAND_MAX = 1.0
 const NUM_SAMPLE = 20 
-const DEG_WASS = 4
+const DEG_WASS = 2
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
-                   WassInfo(1.0,DEG_WASS),
-                   WassInfo(1e-1,DEG_WASS),
+                   WassInfo(1e-4,DEG_WASS),
+                   WassInfo(1e-3,DEG_WASS),
                    WassInfo(1e-2,DEG_WASS),
-                   WassInfo(1e-3,DEG_WASS)]
+                   WassInfo(1e-1,DEG_WASS)]
 
 # function that conducts experiments on the multiproduct assembly problem
 function experiment_assembly(
@@ -73,15 +73,21 @@ function experiment_assembly(
     C = [zeros(n+1)' -ξ[1:m]'; zeros(n) -I zeros(n,m)]
     A = [I zeros(n,m); P' I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
     b = [ξ[m+1:m+n]; r; zeros(m)]
-    p = m*D^2/4-sum([(ξ[i]-D/2)^2 for i in 1:m])+n*S^2/4-sum([(ξ[i+m]-S/2)^2 for i in 1:n])
-    a = A*y
     Ξ = basic_semialgebraic_set(FullSpace(), 
                                 [[ξ[i] for i in 1:m+n];
                                  [D-ξ[i] for i in 1:m];
-                                 [S-ξ[i+m] for i in 1:n];
-                                 [(a[i]-b[i])*p for i in 1:2m+n]
+                                 [S-ξ[i+m] for i in 1:n]
                                 ])
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ)
+    # print the problem information
+    println("Start the experiment on the two-stage product assembly problem...")
+    println("The number of assembly parts is ", n)
+    println("The number of products is ", m)
+    println("The number of samples is ", N)
+    println("The first-stage cost function is ", f_x'*x)
+    println("The second-stage cost function is ", [1;x]'*C*[1;y])
+    println("The second-stage constraints are ", A*y - b)
+    println()
     # loop over all Wasserstein robustness settings
     for wassinfo in W
         # define the main linear optimization problem 

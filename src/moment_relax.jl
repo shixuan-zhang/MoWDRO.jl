@@ -56,7 +56,8 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
-        flag_Schmüdgen = false
+        flag_Schmüdgen = false,
+        flag_rad_prod = true
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -71,7 +72,7 @@ function eval_moment_Wass(
         else
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
-        relaxdeg = maximum([deg_A, deg_b, deg_C, deg_Ξ, wassinfo.p, 4])
+        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
         println("The moment relaxation degree is set to ", relaxdeg)
     end
     # alias the augmented state
@@ -91,6 +92,12 @@ function eval_moment_Wass(
         f = [1;x̄]'*recourse.C*[1;recourse.y] - w̄*p
         # define the semi-algebraic set
         S = intersect(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
+        if flag_rad_prod
+            R2 = (wassinfo.r^wassinfo.p*N)^(2/wassinfo.p)
+            p2 = (recourse.ξ-ξ̂)'*(recourse.ξ-ξ̂)
+            m = length(recourse.b)
+            S = intersect(S, basic_semialgebraic_set(FullSpace(), [(recourse.A*recourse.y-recourse.b)[i]*(R2-p2) for i in 1:m]))
+        end
         # define the SOS optimization model
         model = SOSModel(DEFAULT_SDP)
         @variable(model, optval)
@@ -102,7 +109,7 @@ function eval_moment_Wass(
         end
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
-        if is_solved_and_feasible(model)
+        if is_solved_and_feasible(model, allow_almost=true)
             μ = moments(constr)
             # retrieve the pseudo-expectations for the polynomials
             Ĉ = map(m->expectation(μ,m), recourse.C)
