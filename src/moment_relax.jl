@@ -56,8 +56,9 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
-        flag_Schmüdgen = false,
-        flag_rad_prod = true
+        flag_rad_prod = false,
+        flag_all_prod = false,
+        val_add_bound = 1.0e2
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -79,7 +80,7 @@ function eval_moment_Wass(
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
     # define the Schmüdgen type certificate
-    if flag_Schmüdgen
+    if flag_all_prod
         ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
         certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
     end
@@ -98,11 +99,17 @@ function eval_moment_Wass(
             m = length(recourse.b)
             S = intersect(S, basic_semialgebraic_set(FullSpace(), [(recourse.A*recourse.y-recourse.b)[i]*(R2-p2) for i in 1:m]))
         end
+        if val_add_bound > 0.0
+            B = val_add_bound
+            n = length(recourse.y)
+            S = intersect(S, basic_semialgebraic_set(FullSpace(), [[B-recourse.y[i] for i in 1:n];
+                                                                   [B+recourse.y[i] for i in 1:n]]))
+        end
         # define the SOS optimization model
         model = SOSModel(DEFAULT_SDP)
         @variable(model, optval)
         @objective(model, Min, optval)
-        if flag_Schmüdgen
+        if flag_all_prod
             @constraint(model, constr, optval >= f, domain=S, certificate=certificate, maxdegree=relaxdeg)
         else
             @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)

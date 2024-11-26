@@ -33,6 +33,8 @@ const DEMAND_MAX = 1.0
 const NUM_SAMPLE = 20 
 const DEG_WASS = 2
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
+                   WassInfo(1e-6,DEG_WASS),
+                   WassInfo(1e-5,DEG_WASS),
                    WassInfo(1e-4,DEG_WASS),
                    WassInfo(1e-3,DEG_WASS),
                    WassInfo(1e-2,DEG_WASS),

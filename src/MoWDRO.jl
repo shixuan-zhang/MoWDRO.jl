@@ -7,7 +7,7 @@ using DynamicPolynomials, SumOfSquares, SemialgebraicSets
 using JuMP
 using Format
 # set default solvers
-import HiGHS, CSDP, SDPA
+import HiGHS, CSDP
 const DEFAULT_LP = optimizer_with_attributes(HiGHS.Optimizer, MOI.Silent() => true)
 const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true)
 
