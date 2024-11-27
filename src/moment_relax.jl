@@ -20,29 +20,31 @@ function eval_moment_Wass(
     if relaxdeg <= 0
         relaxdeg = max(maxdegree(f),wassinfo.p)
     end
-    # define the Schmüdgen certificate for moment relaxation
-    ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
-    certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
     # loop over all samples for the loss function moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
         d = length(ξ̂)
         # define the polynomial objective
         p = sum((loss.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
-        # define the SOS optimization model
-        model = SOSModel(DEFAULT_SDP)
-        @variable(model, optval)
-        @objective(model, Min, optval)
-        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate, maxdegree=relaxdeg)
-        # solve the SOS model and extract the (pseudo-)moments/measure
+        # define the moment optimization model
+        model = GMPModel(DEFAULT_SDP)
+        @variable(model, μ, Meas(loss.ξ, support=loss.Ξ))
+        @objective(model, Max, Mom(f-w̄*p,μ))
+        @constraint(model, Mom(1,μ) == 1)
+        set_approximation_degree(model, relaxdeg)
+        # solve the moment model and extract the (pseudo-)moments/measure
         optimize!(model)
-        μ = moments(constr)
-        # retrieve the pseudo-expectations for the polynomials
-        v̂ = expectation(μ,f)
-        p̂ = expectation(μ,p)
-        ĝ = map(m->expectation(μ,m), subs.(loss.∇ₓF,loss.x=>x̄))
-        # store the cut
-        push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
+        if termination_status(model) == OPTIMAL
+            μ̄ = measure(μ)
+            # retrieve the pseudo-expectations for the polynomials
+            v̂ = expectation(μ̄,f)
+            p̂ = expectation(μ̄,p)
+            ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
+            # store the cut
+            push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
+        else
+            error("ERROR: unable to solve the moment relaxation!")
+        end
     end
     # return the aggregate cut
     return combine_linear_cuts(cuts)
