@@ -8,9 +8,10 @@ using SumOfSquares, MomentOpt
 using JuMP
 using Format
 # set default solvers
-import HiGHS, CSDP
+import HiGHS, CSDP, COSMO
 const DEFAULT_LP = optimizer_with_attributes(HiGHS.Optimizer, MOI.Silent() => true)
-const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => false)
+const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true, "affine" => 1)
+#const DEFAULT_SDP = optimizer_with_attributes(COSMO.Optimizer, MOI.Silent() => false)
 
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo
@@ -23,6 +24,7 @@ const VAL_TOL = 1.0e-6
 const VAL_INF = 1.0e9
 const VAL_INIT_AUX = 1.0e2
 const NUM_MAX_ITER = 1000
+const MAX_DEG_RELAX = 6
 
 # define basic types
 include("types.jl")

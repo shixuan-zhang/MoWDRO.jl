@@ -31,10 +31,11 @@ function eval_moment_Wass(
         @variable(model, μ, Meas(loss.ξ, support=loss.Ξ))
         @objective(model, Max, Mom(f-w̄*p,μ))
         @constraint(model, Mom(1,μ) == 1)
+        set_approximation_mode(model, PRIMAL_RELAXATION_MODE())
         set_approximation_degree(model, relaxdeg)
         # solve the moment model and extract the (pseudo-)moments/measure
         optimize!(model)
-        if termination_status(model) == OPTIMAL
+        if termination_status(model) ∈ [OPTIMAL, ALMOST_OPTIMAL]
             μ̄ = measure(μ)
             # retrieve the pseudo-expectations for the polynomials
             v̂ = expectation(μ̄,f)
@@ -43,7 +44,7 @@ function eval_moment_Wass(
             # store the cut
             push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
         else
-            error("ERROR: unable to solve the moment relaxation!")
+            error("The moment relaxation has failed with status: ", termination_status(model))
         end
     end
     # return the aggregate cut
@@ -58,9 +59,8 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
-        flag_rad_prod = false,
-        flag_all_prod = false,
-        val_add_bound = 1.0e2
+        flag_rad_prod = true,
+        val_add_bound = -1.0
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -76,16 +76,10 @@ function eval_moment_Wass(
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
         relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
-        println("The moment relaxation degree is set to ", relaxdeg)
     end
     # alias the augmented state
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
-    # define the Schmüdgen type certificate
-    if flag_all_prod
-        ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
-        certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
-    end
     # loop over all samples for the linear recourse moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
@@ -107,23 +101,24 @@ function eval_moment_Wass(
             S = intersect(S, basic_semialgebraic_set(FullSpace(), [[B-recourse.y[i] for i in 1:n];
                                                                    [B+recourse.y[i] for i in 1:n]]))
         end
-        # define the SOS optimization model
-        model = SOSModel(DEFAULT_SDP)
-        @variable(model, optval)
-        @objective(model, Min, optval)
-        if flag_all_prod
-            @constraint(model, constr, optval >= f, domain=S, certificate=certificate, maxdegree=relaxdeg)
-        else
-            @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)
-        end
-        # solve the SOS model and extract the (pseudo-)moments/measure
+        # define the moment optimization model
+        model = GMPModel(DEFAULT_SDP)
+        @variable(model, μ, Meas([recourse.ξ; recourse.y], support=S))
+        @objective(model, Max, Mom(f,μ))
+        @constraint(model, Mom(1,μ) == 1)
+        set_approximation_mode(model, PRIMAL_RELAXATION_MODE())
+        set_approximation_degree(model, relaxdeg)
+        println("DEBUG: the moment relaxation degree is\n", relaxdeg)
+        println("DEBUG: the moment relaxation domain is\n", S)
+        println("DEBUG: the moment relaxation model is\n", model)
+        # solve the moment model and extract the (pseudo-)moments/measure
         optimize!(model)
-        if is_solved_and_feasible(model, allow_almost=true)
-            μ = moments(constr)
+        if termination_status(model) ∈ [OPTIMAL, ALMOST_OPTIMAL]
+            μ̄ = measure(μ)
             # retrieve the pseudo-expectations for the polynomials
-            Ĉ = map(m->expectation(μ,m), recourse.C)
-            ŷ = map(m->expectation(μ,m), recourse.y)
-            p̂ = expectation(μ,p)
+            Ĉ = map(m->expectation(μ̄,m), recourse.C)
+            ŷ = map(m->expectation(μ̄,m), recourse.y)
+            p̂ = expectation(μ̄,p)
             # store the cut
             push!(cuts, [Ĉ*[1;ŷ];wassinfo.r-p̂])
         else

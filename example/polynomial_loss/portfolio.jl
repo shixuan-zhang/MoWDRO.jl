@@ -60,6 +60,8 @@ function experiment_portfolio(
     F = sum(C[i]*(x'*ξ)^i for i in 1:k)
     ∇ₓF = differentiate(F,x)
     Ξ = basic_semialgebraic_set(FullSpace(), [[ξ[i] for i in 1:n]; [1-ξ[i] for i in 1:n]])
+    # add a redundant bound to enhance the moment relaxation
+    Ξ = intersect(Ξ, basic_semialgebraic_set(FullSpace(), [n/4-sum((ξ[i]-1/2)^2 for i in 1:n)]))
     loss = SamplePolynomialLoss(x, ξ, F, ∇ₓF, Ξ)
     # print the problem information
     println("Start the experiment on the portfolio management problem...")
