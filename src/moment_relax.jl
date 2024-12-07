@@ -56,9 +56,10 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
-        flag_rad_prod = false,
+        flag_rad_prod = true,
         flag_all_prod = false,
-        val_add_bound = 1.0e2
+        val_add_bound = -1.0,
+        str_sos_approx = "DSOS" # DSOS or SDSOS
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -73,7 +74,7 @@ function eval_moment_Wass(
         else
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
-        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
+        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p, 6])
         println("The moment relaxation degree is set to ", relaxdeg)
     end
     # alias the augmented state
@@ -106,7 +107,17 @@ function eval_moment_Wass(
                                                                    [B+recourse.y[i] for i in 1:n]]))
         end
         # define the SOS optimization model
-        model = SOSModel(DEFAULT_SDP)
+        model = SOSModel()
+        # check the SOS approximation cone
+        if str_sos_approx == "SOS"
+            set_optimizer(model, DEFAULT_SDP)
+        elseif str_sos_approx == "DSOS"
+            PolyJuMP.setdefault!(model, PolyJuMP.NonNegPoly, DSOSCone)
+            set_optimizer(model, DEFAULT_LP)
+        elseif str_sos_approx == "SDSOS"
+            PolyJuMP.setdefault!(model, PolyJuMP.NonNegPoly, SDSOSCone)
+            set_optimizer(model, DEFAULT_SOCP)
+        end
         @variable(model, optval)
         @objective(model, Min, optval)
         if flag_all_prod
