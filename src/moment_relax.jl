@@ -59,7 +59,7 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
-        flag_rad_prod = true,
+        flag_rad_prod = false,
         val_add_bound = -1.0
     )
     N = length(samples)
@@ -85,7 +85,7 @@ function eval_moment_Wass(
         ξ̂ = samples[i]
         d = length(ξ̂)
         # define the polynomial objective 
-        p = sum((recourse.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
+        p = ((recourse.ξ-ξ̂)'*(recourse.ξ-ξ̂))^ceil(Int,wassinfo.p/2)
         f = [1;x̄]'*recourse.C*[1;recourse.y] - w̄*p
         # define the semi-algebraic set
         S = intersect(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
@@ -98,8 +98,7 @@ function eval_moment_Wass(
         if val_add_bound > 0.0
             B = val_add_bound
             n = length(recourse.y)
-            S = intersect(S, basic_semialgebraic_set(FullSpace(), [[B-recourse.y[i] for i in 1:n];
-                                                                   [B+recourse.y[i] for i in 1:n]]))
+            S = intersect(S, basic_semialgebraic_set(FullSpace(), [B^2-recourse.y[i]^2 for i in 1:n]))
         end
         # define the moment optimization model
         model = GMPModel(DEFAULT_SDP)

@@ -33,6 +33,8 @@ const DEMAND_MAX = 1.0
 const NUM_SAMPLE = 20 
 const DEG_WASS = 2
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
+                   WassInfo(1.0e-2,DEG_WASS),
+                   WassInfo(1.0e-1,DEG_WASS),
                    WassInfo(1.0,DEG_WASS)]
 
 # function that conducts experiments on the multiproduct assembly problem
@@ -45,22 +47,34 @@ function experiment_assembly(
         r::Vector{Float64} = zeros(0),   # vector of regular prices
         f_x::Vector{Float64} = zeros(0), # vector of part costs
         D::Float64 = DEMAND_MAX,         # bound on the demands
-        S::Float64 = SALVAGE_MAX         # bound on the salvage prices
+        S::Float64 = SALVAGE_MAX,        # bound on the salvage prices
+        flag_random::Bool = false
     )
     # check if the assembly coefficients are supplied
     if size(P) != (n,m)
-        P = rand(n,m) .+ 0.1
-        for i = 1:m
-            P[i,:] ./= sum(P[i,:])
+        P = ones(n,m) ./ n
+        if flag_random
+            P = rand(n,m) .+ 0.1
+            for i = 1:m
+                P[i,:] ./= sum(P[i,:])
+            end
         end
     end
     # check if the regular prices are supplied
     if length(r) != m
-        r = rand(m) .* (REG_PRICE_MAX-REG_PRICE_MIN) .+ REG_PRICE_MIN
+        v = ones(m) ./ collect(2:m+1)
+        if flag_random
+            v = rand(m)
+        end
+        r = v .* (REG_PRICE_MAX-REG_PRICE_MIN) .+ REG_PRICE_MIN
     end
     # randomly generate the linear objective function if not supplied
     if length(f_x) != n
-        f_x = rand(n) .* (PART_COST_MAX-PART_COST_MIN) .+ PART_COST_MIN
+        v = ones(n) ./ collect(2:n+1)
+        if flag_random
+            v = rand(n)
+        end
+        f_x = v .* (PART_COST_MAX-PART_COST_MIN) .+ PART_COST_MIN
     end
     # take the samples of salvage prices and demands
     samples = [[rand(m)*D;rand(n)*S] for _ in 1:N]
