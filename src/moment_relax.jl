@@ -107,9 +107,6 @@ function eval_moment_Wass(
         @constraint(model, Mom(1,μ) == 1)
         set_approximation_mode(model, PRIMAL_RELAXATION_MODE())
         set_approximation_degree(model, relaxdeg)
-        println("DEBUG: the moment relaxation degree is\n", relaxdeg)
-        println("DEBUG: the moment relaxation domain is\n", S)
-        println("DEBUG: the moment relaxation model is\n", model)
         # solve the moment model and extract the (pseudo-)moments/measure
         optimize!(model)
         if termination_status(model) ∈ [OPTIMAL, ALMOST_OPTIMAL]
@@ -121,6 +118,10 @@ function eval_moment_Wass(
             # store the cut
             push!(cuts, [Ĉ*[1;ŷ];wassinfo.r-p̂])
         else
+            println("DEBUG: the moment relaxation degree is\n", relaxdeg)
+            println("DEBUG: the moment relaxation domain is\n", S)
+            println("DEBUG: the moment relaxation objective is\n", f)
+            println("DEBUG: the moment relaxation model is\n", model)
             error("The moment relaxation has failed with status: ", termination_status(model))
         end
     end

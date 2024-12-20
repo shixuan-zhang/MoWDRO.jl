@@ -15,6 +15,7 @@ function solve_main_level(
         opt_gap::Float64 = VAL_TOL,
         max_aux::Float64 = VAL_BOUND,
         level::Float64 = VAL_LEVEL,
+        perturb_Wass:Float64 = -1.0,
         print::Bool = false
     )::MainSolution where T <: SampleSubproblem
     # check if Wasserstein ambiguity is needed
@@ -41,6 +42,9 @@ function solve_main_level(
     sol_w = 0.0
     if flag_Wass
         sol_w = value(main.w)
+        if perturb_Wass > 0.0
+            sol_w = max(sol_w, VAL_PERT_WASS)
+        end
     end
     # get the initial upper bound
     cut = zeros(dim_x+2)

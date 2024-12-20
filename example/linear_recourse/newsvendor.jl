@@ -23,7 +23,7 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_PROD = 1 
+const NUM_PROD = 3
 const DEMAND_MAX = 10.0
 const BACKLOG_MAX = 2.0
 const HOLDING_MAX = 0.5
