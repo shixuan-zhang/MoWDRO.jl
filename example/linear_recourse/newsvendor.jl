@@ -29,6 +29,7 @@ const BACKLOG_MAX = 2.0
 const HOLDING_MAX = 0.5
 const NUM_SAMPLE = 20
 const DEG_WASS = 2
+const PERTURB_WASS = 1.0
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
                    WassInfo(1.0e-2,DEG_WASS),
                    WassInfo(1.0e-1,DEG_WASS),
@@ -94,7 +95,7 @@ function experiment_newsvendor(
         ϕ = @variable(model, ϕ, base_name="ϕ")
         main = MainProblem(model, x, VariableRef[], w, ϕ, f_x, Float64[])
         # solve the problem
-        sol = solve_main_level(main, recourse, samples, wassinfo, print=true)
+        sol = solve_main_level(main, recourse, samples, wassinfo, perturb_Wass=PERTURB_WASS, print=true)
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
         println("f = ", sol.f)
