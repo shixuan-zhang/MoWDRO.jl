@@ -59,15 +59,20 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
-        flag_rad_prod = false,
+        flag_rad_prod = true,
         val_add_bound = -1.0
     )
     N = length(samples)
     cuts = Vector{Float64}[]
+    # alias the augmented state
+    x̄ = augstate[1:end-1]
+    w̄ = augstate[end]
+    # calculate the half of Wasserstein order p, rounded up
+    q = cld(wassinfo.p, 2) 
     # set the default relaxation degree
     if relaxdeg <= 0
         deg_A = maximum(maxdegree.(recourse.A))
-        deg_C = maximum(maxdegree.(recourse.C)) + 1
+        deg_C = maximum(maxdegree.(recourse.C))
         deg_b = maximum(maxdegree.(recourse.b))
         deg_Ξ = 0
         if recourse.Ξ.V != FullSpace()
@@ -75,17 +80,14 @@ function eval_moment_Wass(
         else
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
-        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
+        relaxdeg = maximum([deg_A+1, deg_b+1, deg_C+1, deg_Ξ, 2*q])
     end
-    # alias the augmented state
-    x̄ = augstate[1:end-1]
-    w̄ = augstate[end]
     # loop over all samples for the linear recourse moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
         d = length(ξ̂)
         # define the polynomial objective 
-        p = ((recourse.ξ-ξ̂)'*(recourse.ξ-ξ̂))^ceil(Int,wassinfo.p/2)
+        p = ((recourse.ξ-ξ̂)'*(recourse.ξ-ξ̂))^q
         f = [1;x̄]'*recourse.C*[1;recourse.y] - w̄*p
         # define the semi-algebraic set
         S = intersect(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
@@ -94,6 +96,7 @@ function eval_moment_Wass(
             p2 = (recourse.ξ-ξ̂)'*(recourse.ξ-ξ̂)
             m = length(recourse.b)
             S = intersect(S, basic_semialgebraic_set(FullSpace(), [(recourse.A*recourse.y-recourse.b)[i]*(R2-p2) for i in 1:m]))
+            relaxdeg = maximum([relaxdeg, deg_A+3, deg_b+3])
         end
         if val_add_bound > 0.0
             B = val_add_bound
@@ -116,7 +119,16 @@ function eval_moment_Wass(
             ŷ = map(m->expectation(μ̄,m), recourse.y)
             p̂ = expectation(μ̄,p)
             # store the cut
-            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r-p̂])
+            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^(2*q)-p̂])
+        elseif termination_status(model) == SLOW_PROGRESS
+            μ̄ = measure(μ)
+            # retrieve the pseudo-expectations for the polynomials
+            Ĉ = map(m->expectation(μ̄,m), recourse.C)
+            ŷ = map(m->expectation(μ̄,m), recourse.y)
+            p̂ = expectation(μ̄,p)
+            # store the cut
+            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^(2*q)-p̂])
+            println("DEBUG: slow progress reported by the solver; the moment of the penalty term is ", p̂)
         else
             println("DEBUG: the moment relaxation degree is\n", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", S)

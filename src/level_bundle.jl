@@ -14,8 +14,8 @@ function solve_main_level(
         max_iter::Int = NUM_MAX_ITER,
         opt_gap::Float64 = VAL_TOL,
         max_aux::Float64 = VAL_BOUND,
+        min_aux::Float64 = -1.0,
         level::Float64 = VAL_LEVEL,
-        perturb_Wass::Float64 = -1.0,
         print::Bool = false
     )::MainSolution where T <: SampleSubproblem
     # check if Wasserstein ambiguity is needed
@@ -29,6 +29,9 @@ function solve_main_level(
     obj = main.f_x'*main.x + main.f_u'*main.u + main.ϕ 
     # add the artificial bound on the Wasserstein auxiliary variable w 
     set_upper_bound(main.w, max_aux)
+    if min_aux > 0.0
+        set_lower_bound(main.w, min_aux)
+    end
     # add the artificial bound on the recourse auxiliary variable ϕ
     set_lower_bound(main.ϕ, -max_aux)
     # get the initial solution and lower bound
@@ -42,8 +45,8 @@ function solve_main_level(
     sol_w = 0.0
     if flag_Wass
         sol_w = value(main.w)
-        if perturb_Wass > 0.0
-            sol_w = max(sol_w, perturb_Wass)
+        if min_aux > 0.0
+            println("DEBUG: the Wasserstein dual variable is ", sol_w)
         end
     end
     # get the initial upper bound
