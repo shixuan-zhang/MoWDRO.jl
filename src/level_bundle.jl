@@ -90,6 +90,9 @@ function solve_main_level(
         sol_w = 0.0
         if flag_Wass
             sol_w = value(main.w)
+            if min_aux > 0.0
+                println("DEBUG: the Wasserstein dual variable is ", sol_w)
+            end
         end
         val_f = main.f_x'*sol_x + main.f_u'*sol_u
         # get an updated upper bound

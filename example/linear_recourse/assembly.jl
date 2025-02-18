@@ -31,7 +31,7 @@ const PART_COST_MIN = 2.0
 const SALVAGE_MAX = 2.0
 const DEMAND_MAX = 1.0
 const NUM_SAMPLE = 20 
-const DEG_WASS = 2
+const DEG_WASS = 4
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
                    WassInfo(1.0e-2,DEG_WASS),
                    WassInfo(1.0e-1,DEG_WASS),

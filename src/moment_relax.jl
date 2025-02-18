@@ -60,7 +60,8 @@ function eval_moment_Wass(
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
         flag_rad_prod = true,
-        val_add_bound = -1.0
+        val_add_bound = 1.0e2,
+        val_relax_tol = VAL_TOL
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -101,7 +102,11 @@ function eval_moment_Wass(
         if val_add_bound > 0.0
             B = val_add_bound
             n = length(recourse.y)
-            S = intersect(S, basic_semialgebraic_set(FullSpace(), [B^2-recourse.y[i]^2 for i in 1:n]))
+            S = intersect(S, basic_semialgebraic_set(FullSpace(), [[B-recourse.y[i] for i in 1:n];
+                                                                   [recourse.y[i]-B for i in 1:n]]))
+            for j = 1:q
+                S = intersect(S, basic_semialgebraic_set(FullSpace(), [B^(2*j)-recourse.y[i]^(2*j) for i in 1:n]))
+            end
         end
         # define the moment optimization model
         model = GMPModel(DEFAULT_SDP)
@@ -121,16 +126,26 @@ function eval_moment_Wass(
             # store the cut
             push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^(2*q)-p̂])
         elseif termination_status(model) == SLOW_PROGRESS
+            println("DEBUG: slow progress reported by the solver...")
             μ̄ = measure(μ)
             # retrieve the pseudo-expectations for the polynomials
             Ĉ = map(m->expectation(μ̄,m), recourse.C)
             ŷ = map(m->expectation(μ̄,m), recourse.y)
             p̂ = expectation(μ̄,p)
-            # store the cut
-            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^(2*q)-p̂])
-            println("DEBUG: slow progress reported by the solver; the moment of the penalty term is ", p̂)
+            # check if the objective values agree
+            v̄ = objective_value(model)
+            v̂ = [1;x̄]'*Ĉ*[1;ŷ]-w̄*p̂
+            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
+                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^(2*q)-p̂])
+            else
+                println("DEBUG: the moment of the penalty term is ", p̂)
+                println("DEBUG: the recourse value is ", v̄) 
+                println("DEBUG: the moment relaxation solution gives a value ", v̂) 
+                println("DEBUG: The recourse evaluation error is ", v̄-v̂)
+                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^(2*q)-p̂])
+            end
         else
-            println("DEBUG: the moment relaxation degree is\n", relaxdeg)
+            println("DEBUG: the moment relaxation degree is ", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", S)
             println("DEBUG: the moment relaxation objective is\n", f)
             println("DEBUG: the moment relaxation model is\n", model)
