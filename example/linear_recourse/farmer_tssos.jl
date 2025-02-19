@@ -21,9 +21,9 @@ using .MoWDRO
 # experiment parameters
 const NUM_CROP = 2
 const NUM_TECH = 1 
-const MAX_CROP_YIELD = [20.0,30.0]
-const SELL_PRICE = [15.0,18.0]
-const COST_SEED = [3.0,4.0]
+const MAX_CROP_YIELD = [2.0,3.0]
+const SELL_PRICE = [1.50,1.80]
+const COST_SEED = [0.3,0.4]
 const TECH_CONS = [0.5 0.6] # weighted sum <= 1.0
 const NUM_SAMPLE = 20 
 const MIN_AUX = 1.0e-2
@@ -79,15 +79,15 @@ function experiment_farmer(
             p2 = (ξ-ξ̂)'*(ξ-ξ̂)
             k = length(b)
             for j = 1:k
-                append!(S, [(A*y-b)[j]*(R2-p2)])
+                #append!(S, [(A*y-b)[j]*(R2-p2)])
             end
-            B = 1.0e2
+            B = 1.0
             for j = 1:n
-                append!(S, [B+y[j]])
-                append!(S, [B-y[j]])
+                #append!(S, [B+y[j]])
+                #append!(S, [B-y[j]])
             end
             for l = 1:div(wassinfo.p,2,RoundDown)
-                append!(S, [B^(2*l)-y[j]^(2*l) for j in 1:n])
+                #append!(S, [B^(2*l)-y[j]^(2*l) for j in 1:n])
             end
             # check the moment relaxation model
             println("The moment relaxation is defined by polynomial inequalities:")
