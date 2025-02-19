@@ -4,7 +4,7 @@ module MoWDRO
 # import basic mathematics and statistics modules
 using LinearAlgebra, Random, Statistics
 using DynamicPolynomials, MultivariateBases
-using SumOfSquares, MomentOpt
+using SumOfSquares 
 using JuMP
 using Format
 # set default solvers
