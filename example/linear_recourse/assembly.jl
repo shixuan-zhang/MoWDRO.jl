@@ -22,8 +22,8 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_PART = 5
-const NUM_PROD = 5 
+const NUM_PART = 3
+const NUM_PROD = 3 
 const REG_PRICE_MIN = 2.0
 const REG_PRICE_MAX = 5.0
 const PART_COST_MAX = 0.2
