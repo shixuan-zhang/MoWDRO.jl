@@ -20,9 +20,9 @@ using .MoWDRO
 # experiment parameters
 const NUM_CROP = 2
 const NUM_TECH = 1 
-const MAX_CROP_YIELD = [20.0,30.0]
-const SELL_PRICE = [15.0,18.0]
-const COST_SEED = [3.0,4.0]
+const MAX_CROP_YIELD = [3.0,4.0]
+const SELL_PRICE = [1.5,1.8]
+const COST_SEED = [0.1,0.2]
 const TECH_CONS = [0.5 0.6] # weighted sum <= 1.0
 const NUM_SAMPLE = 20 
 const MIN_AUX = 1.0e-2
@@ -32,7 +32,8 @@ const WASS_INFO = [WassInfo(0.0,DEG_WASS),
                    WassInfo(1.0e-3,DEG_WASS),
                    WassInfo(1.0e-2,DEG_WASS),
                    WassInfo(1.0e-1,DEG_WASS),
-                   WassInfo(1.0e0,DEG_WASS)]
+                   WassInfo(1.0e0,DEG_WASS),
+                   WassInfo(1.0e1,DEG_WASS)]
 
 # function that conducts experiments on the farmer's planning problem
 function experiment_farmer(
@@ -46,17 +47,17 @@ function experiment_farmer(
         f_x::Vector{Float64} = COST_SEED,    # vector of part costs
     )
     # take the samples of salvage prices and demands
-    samples = [rand(n) .* q for _ in 1:N]
+    samples = [rand(n) for _ in 1:N]
     # alias the number of technical constraints
     m = NUM_TECH
     # define the two-stage linear recourse function
     @polyvar x[1:n] ξ[1:n] y[1:n+m]
-    C = -[0 zeros(n)'; zeros(n) diagm(ξ); s zeros(m,n)]'
+    C = -[0 zeros(n)'; zeros(n) diagm(ξ.*q); s zeros(m,n)]'
     A = [I R'; I] .+ 0.0*sum(ξ) # to promote the type
     b = [p; zeros(n+m)]
     Ξ = basic_semialgebraic_set(FullSpace(), 
                                 [[ξ[i] for i in 1:n];
-                                 [q[i]-ξ[i] for i in 1:n]
+                                 [1.0-ξ[i] for i in 1:n]
                                 ])
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ)
     # print the problem information

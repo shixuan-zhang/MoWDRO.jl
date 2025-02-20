@@ -22,13 +22,13 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_PART = 3
-const NUM_PROD = 2 
-const REG_PRICE_MIN = 50.0
-const REG_PRICE_MAX = 200.0
-const PART_COST_MAX = 5.0
-const PART_COST_MIN = 2.0
-const SALVAGE_MAX = 2.0
+const NUM_PART = 5
+const NUM_PROD = 5 
+const REG_PRICE_MIN = 2.0
+const REG_PRICE_MAX = 5.0
+const PART_COST_MAX = 0.2
+const PART_COST_MIN = 0.1
+const SALVAGE_MAX = 0.1
 const DEMAND_MAX = 1.0
 const NUM_SAMPLE = 20 
 const DEG_WASS = 4
@@ -77,17 +77,17 @@ function experiment_assembly(
         f_x = v .* (PART_COST_MAX-PART_COST_MIN) .+ PART_COST_MIN
     end
     # take the samples of salvage prices and demands
-    samples = [[rand(m)*D;rand(n)*S] for _ in 1:N]
+    samples = [[rand(m);rand(n)] for _ in 1:N]
     # define the two-stage linear recourse function
     # ξᵢ represents qᵢ, i = 1,…,m, and ξⱼ₊ₘ represents sⱼ, j = 1,…,n
     @polyvar x[1:n] ξ[1:m+n] y[1:n+m]
-    C = [zeros(n+1)' -ξ[1:m]'; zeros(n) -I zeros(n,m)]
+    C = [zeros(n+1)' -D*ξ[1:m]'; zeros(n) -I zeros(n,m)]
     A = [I zeros(n,m); P' I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [ξ[m+1:m+n]; r; zeros(m)]
+    b = [S*ξ[m+1:m+n]; r; zeros(m)]
     Ξ = basic_semialgebraic_set(FullSpace(), 
                                 [[ξ[i] for i in 1:m+n];
-                                 [D-ξ[i] for i in 1:m];
-                                 [S-ξ[i+m] for i in 1:n]
+                                 [1-ξ[i] for i in 1:m];
+                                 [1-ξ[i+m] for i in 1:n]
                                 ])
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ)
     # print the problem information
@@ -109,11 +109,13 @@ function experiment_assembly(
         ϕ = @variable(model, ϕ, base_name="ϕ")
         main = MainProblem(model, x, VariableRef[], w, ϕ, f_x, Float64[])
         # solve the problem
+        time_start = time()
         sol = solve_main_level(main, recourse, samples, wassinfo, print=true)
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
         println("f = ", sol.f)
         println("ϕ = ", sol.ϕ)
+        println("The total computation time is ", time()-time_start)
         println()
     end
 end

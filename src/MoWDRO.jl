@@ -11,7 +11,7 @@ using Format
 import HiGHS, CSDP
 import Mosek, MosekTools
 const DEFAULT_LP = optimizer_with_attributes(HiGHS.Optimizer, MOI.Silent() => true)
-#const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true, "affine" => 1)
+#const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true)
 #const DEFAULT_SDP = optimizer_with_attributes(COSMO.Optimizer, MOI.Silent() => true, "max_iter" => 10000)
 const DEFAULT_SDP = optimizer_with_attributes(Mosek.Optimizer, MOI.Silent() => true)
 

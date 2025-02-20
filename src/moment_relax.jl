@@ -60,7 +60,7 @@ function eval_moment_Wass(
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
         flag_rad_prod = true,
-        val_add_bound = 1.0e2,
+        val_add_bound = -1.0,
         val_relax_tol = VAL_TOL
     )
     N = length(samples)
