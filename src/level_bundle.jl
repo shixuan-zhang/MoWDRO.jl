@@ -3,8 +3,9 @@
 # s.t. (x,u) ∈ Feasible Set, w ≥ 0.
 
 # Artificial upper bound on w is needed for convergence.
-const VAL_BOUND = 1.0e3
+const VAL_BOUND = 1.0e6
 const VAL_LEVEL = 0.5
+const VAL_POS_DUAL = 1.0e-2
 
 function solve_main_level(
         main::MainProblem,
@@ -14,6 +15,7 @@ function solve_main_level(
         max_iter::Int = NUM_MAX_ITER,
         opt_gap::Float64 = VAL_TOL,
         max_aux::Float64 = VAL_BOUND,
+        min_aux::Float64 = VAL_POS_DUAL,
         level::Float64 = VAL_LEVEL,
         print::Bool = false
     )::MainSolution where T <: SampleSubproblem
@@ -28,6 +30,9 @@ function solve_main_level(
     obj = main.f_x'*main.x + main.f_u'*main.u + main.ϕ 
     # add the artificial bound on the Wasserstein auxiliary variable w 
     set_upper_bound(main.w, max_aux)
+    if min_aux > 0.0
+        set_lower_bound(main.w, min_aux)
+    end
     # add the artificial bound on the recourse auxiliary variable ϕ
     set_lower_bound(main.ϕ, -max_aux)
     # get the initial solution and lower bound

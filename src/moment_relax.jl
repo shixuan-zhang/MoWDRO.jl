@@ -59,7 +59,8 @@ function eval_moment_Wass(
         flag_rad_prod = true,
         flag_all_prod = false,
         val_add_bound = -1.0,
-        str_sos_approx = "DSOS" # DSOS or SDSOS
+        val_relax_tol = VAL_TOL,
+        str_sos_approx = "SOS" # DSOS or SDSOS
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -74,7 +75,7 @@ function eval_moment_Wass(
         else
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
-        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p, 6])
+        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
         println("The moment relaxation degree is set to ", relaxdeg)
     end
     # alias the augmented state
@@ -128,14 +129,37 @@ function eval_moment_Wass(
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
         if is_solved_and_feasible(model, allow_almost=true)
-            μ = moments(constr)
+            μ̄ = moments(constr)
             # retrieve the pseudo-expectations for the polynomials
-            Ĉ = map(m->expectation(μ,m), recourse.C)
-            ŷ = map(m->expectation(μ,m), recourse.y)
-            p̂ = expectation(μ,p)
+            Ĉ = map(m->expectation(μ̄,m), recourse.C)
+            ŷ = map(m->expectation(μ̄,m), recourse.y)
+            p̂ = expectation(μ̄,p)
             # store the cut
-            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r-p̂])
+            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+        elseif termination_status(model) == SLOW_PROGRESS
+            println("DEBUG: slow progress reported by the solver...")
+            μ̄ = moments(constr)
+            # retrieve the pseudo-expectations for the polynomials
+            Ĉ = map(m->expectation(μ̄,m), recourse.C)
+            ŷ = map(m->expectation(μ̄,m), recourse.y)
+            p̂ = expectation(μ̄,p)
+            # check if the objective values agree
+            v̄ = objective_value(model)
+            v̂ = [1;x̄]'*Ĉ*[1;ŷ]-w̄*p̂
+            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
+                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+            else
+                println("DEBUG: the moment of the penalty term is ", p̂)
+                println("DEBUG: the recourse value is ", v̄) 
+                println("DEBUG: the moment relaxation solution gives a value ", v̂) 
+                println("DEBUG: The recourse evaluation error is ", v̄-v̂)
+                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+            end
         else
+            println("DEBUG: the moment relaxation degree is ", relaxdeg)
+            println("DEBUG: the moment relaxation domain is\n", S)
+            println("DEBUG: the moment relaxation objective is\n", f)
+            println("DEBUG: the moment relaxation model is\n", model)
             error("The moment relaxation has failed with status: ", termination_status(model))
         end
     end
