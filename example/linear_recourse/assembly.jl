@@ -24,13 +24,13 @@ using .MoWDRO
 
 # experiment parameters
 const NUM_PART = 5
-const NUM_PROD = 5 
-const REG_PRICE_MIN = 2.0
-const REG_PRICE_MAX = 5.0
-const PART_COST_MAX = 0.5
-const PART_COST_MIN = 0.2
-const LATE_PART_COST = 2.0
-const SALVAGE_RATIO = 0.1
+const NUM_PROD = 5
+const PRICE_MIN = 3.0
+const PRICE_MAX = 5.0
+const COST_MAX = 2.0
+const COST_MIN = 1.0
+const LATE_RATIO = 3.0
+const SALVAGE_RATIO = 0.8
 const DEMAND_MAX = 10.0
 const NUM_SAMPLE = 20 
 const DEG_WASS = 4
@@ -65,18 +65,18 @@ function experiment_assembly(
     if length(r) != m
         r = zeros(m)
         for j = 1:m
-            r[j] = REG_PRICE_MAX - (REG_PRICE_MAX-REG_PRICE_MIN)*(j-1)/(m-1)
+            r[j] = PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1)
         end
     end
     # check if the part prices are supplied
     if length(f_x) != n
         f_x = zeros(n)
         for i = 1:n
-            f_x[i] = PART_COST_MAX - (PART_COST_MAX-PART_COST_MIN)*(i-1)/(n-1)
+            f_x[i] = COST_MIN + (COST_MAX-COST_MIN)*(i-1)/(n-1)
         end
     end
     if length(g) != n
-        g = LATE_PART_COST * f_x
+        g = LATE_RATIO * f_x
     end
     if length(s) != n
         s = SALVAGE_RATIO * f_x
@@ -97,6 +97,7 @@ function experiment_assembly(
     println("Start the experiment on the two-stage product assembly problem...")
     println("The number of assembly parts is ", n)
     println("The number of products is ", m)
+    println("The assembly coefficient matrix is\n", P)
     println("The number of samples is ", N)
     println("The first-stage cost function is ", f_x'*x)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
