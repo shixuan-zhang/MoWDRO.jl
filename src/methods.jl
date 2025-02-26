@@ -13,7 +13,7 @@ function combine_linear_cuts(
         prob = ones(N) ./ N
     end
     # aggregate the cuts
-    return sum([cuts[i] .* prob[i] for i in 1:N]) ./ N
+    return sum([cuts[i] .* prob[i] for i in 1:N])
 end
 
 

@@ -25,13 +25,13 @@ using .MoWDRO
 # experiment parameters
 const NUM_PART = 5
 const NUM_PROD = 5
-const PRICE_MIN = 3.0
-const PRICE_MAX = 5.0
-const COST_MAX = 2.0
-const COST_MIN = 1.0
-const LATE_RATIO = 3.0
+const PRICE_MIN = 2.0
+const PRICE_MAX = 8.0
+const COST_MAX = 0.8
+const COST_MIN = 0.2
+const LATE_RATIO = 2.0
 const SALVAGE_RATIO = 0.8
-const DEMAND_MAX = 10.0
+const DEMAND_MAX = 2.0
 const NUM_SAMPLE = 20 
 const DEG_WASS = 4
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
@@ -65,7 +65,7 @@ function experiment_assembly(
     if length(r) != m
         r = zeros(m)
         for j = 1:m
-            r[j] = PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1)
+            r[j] = PRICE_MIN + (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1)
         end
     end
     # check if the part prices are supplied
@@ -87,7 +87,7 @@ function experiment_assembly(
     @polyvar x[1:n] ξ[1:m] y[1:n+m]
     C = [zeros(n+1)' -D*ξ'; zeros(n) -I zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [s; -g; r; -r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
+    b = [s; -g; r; -2*r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
     Ξ = basic_semialgebraic_set(FullSpace(), 
                                 [[ξ[i] for i in 1:m];
                                  [1-ξ[i] for i in 1:m]
@@ -98,6 +98,9 @@ function experiment_assembly(
     println("The number of assembly parts is ", n)
     println("The number of products is ", m)
     println("The assembly coefficient matrix is\n", P)
+    println("The regular prices are ", r)
+    println("The salvage prices are ", s)
+    println("The late purchase prices are ", g)
     println("The number of samples is ", N)
     println("The first-stage cost function is ", f_x'*x)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
