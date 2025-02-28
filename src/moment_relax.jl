@@ -7,7 +7,8 @@ function eval_moment_Wass(
         augstate::Vector{Float64},
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
-        relaxdeg::Int = 0
+        relaxdeg::Int = 0,
+        val_relax_tol = VAL_TOL
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -36,13 +37,37 @@ function eval_moment_Wass(
         @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate, maxdegree=relaxdeg)
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
-        μ = moments(constr)
         # retrieve the pseudo-expectations for the polynomials
-        v̂ = expectation(μ,f)
-        p̂ = expectation(μ,p)
-        ĝ = map(m->expectation(μ,m), subs.(loss.∇ₓF,loss.x=>x̄))
-        # store the cut
-        push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
+        if is_solved_and_feasible(model, allow_almost=true)
+            μ̄ = moments(constr)
+            v̂ = expectation(μ̄,f)
+            p̂ = expectation(μ̄,p)
+            ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
+            # store the cut
+            push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
+        elseif termination_status(model) == SLOW_PROGRESS
+            println("DEBUG: slow progress reported by the solver...")
+            μ̄ = moments(constr)
+            v̂ = expectation(μ̄,f)
+            p̂ = expectation(μ̄,p)
+            ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
+            v̄ = objective_value(model)
+            v̂ = v̂-w̄*p̂
+            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
+                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+            else
+                println("DEBUG: The loss function evaluation error is ", v̄-v̂)
+                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+            end
+        else 
+            println("DEBUG: the moment relaxation degree is ", relaxdeg)
+            println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
+            println("DEBUG: the moment relaxation objective is\n", f-w̄*p)
+            println("DEBUG: the current main problem solution is\n", x̄)
+            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+            println("DEBUG: the moment relaxation model is\n", model)
+            error("The moment relaxation has failed with status: ", termination_status(model))
+        end
     end
     # return the aggregate cut
     return combine_linear_cuts(cuts)
@@ -76,7 +101,6 @@ function eval_moment_Wass(
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
         relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
-        println("The moment relaxation degree is set to ", relaxdeg)
     end
     # alias the augmented state
     x̄ = augstate[1:end-1]
@@ -149,9 +173,6 @@ function eval_moment_Wass(
             if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
                 push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
             else
-                println("DEBUG: the moment of the penalty term is ", p̂)
-                println("DEBUG: the recourse value is ", v̄) 
-                println("DEBUG: the moment relaxation solution gives a value ", v̂) 
                 println("DEBUG: The recourse evaluation error is ", v̄-v̂)
                 push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
             end
@@ -159,6 +180,8 @@ function eval_moment_Wass(
             println("DEBUG: the moment relaxation degree is ", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", S)
             println("DEBUG: the moment relaxation objective is\n", f)
+            println("DEBUG: the current main problem solution is\n", x̄)
+            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
             println("DEBUG: the moment relaxation model is\n", model)
             error("The moment relaxation has failed with status: ", termination_status(model))
         end

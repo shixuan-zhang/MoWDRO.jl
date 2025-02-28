@@ -1,5 +1,5 @@
 # numerical example for a two-stage multiproduct assembly problem 
-# (see Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)), defined by
+# (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,1]ⁿ, where fₓ ∈ [0,1]ⁿ, and 
 # F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
 #           s.t. wⱼ - uⱼ = xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j,
@@ -25,18 +25,22 @@ using .MoWDRO
 # experiment parameters
 const NUM_PART = 5
 const NUM_PROD = 5
-const PRICE_MIN = 2.0
-const PRICE_MAX = 8.0
+const PRICE_MIN = 1.0
+const PRICE_MAX = 2.0
 const COST_MAX = 0.8
-const COST_MIN = 0.2
+const COST_MIN = 0.5
 const LATE_RATIO = 2.0
-const SALVAGE_RATIO = 0.8
+const SALVAGE_RATIO = 0.5
 const DEMAND_MAX = 2.0
 const NUM_SAMPLE = 20 
 const DEG_WASS = 4
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
                    WassInfo(1.0e-2,DEG_WASS),
+                   WassInfo(2.0e-2,DEG_WASS),
+                   WassInfo(5.0e-2,DEG_WASS),
                    WassInfo(1.0e-1,DEG_WASS),
+                   WassInfo(2.0e-1,DEG_WASS),
+                   WassInfo(5.0e-1,DEG_WASS),
                    WassInfo(1.0,DEG_WASS)]
 
 # function that conducts experiments on the multiproduct assembly problem
@@ -72,7 +76,7 @@ function experiment_assembly(
     if length(f_x) != n
         f_x = zeros(n)
         for i = 1:n
-            f_x[i] = COST_MIN + (COST_MAX-COST_MIN)*(i-1)/(n-1)
+            f_x[i] = COST_MAX - (COST_MAX-COST_MIN)*(i-1)/(n-1)
         end
     end
     if length(g) != n
@@ -87,7 +91,7 @@ function experiment_assembly(
     @polyvar x[1:n] ξ[1:m] y[1:n+m]
     C = [zeros(n+1)' -D*ξ'; zeros(n) -I zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [s; -g; r; -2*r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
+    b = [s; -g; r; -r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
     Ξ = basic_semialgebraic_set(FullSpace(), 
                                 [[ξ[i] for i in 1:m];
                                  [1-ξ[i] for i in 1:m]
