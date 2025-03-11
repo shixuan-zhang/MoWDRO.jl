@@ -8,6 +8,7 @@ function eval_moment_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
+        solver = DEFAULT_SDP,
         val_relax_tol = VAL_TOL
     )
     N = length(samples)
@@ -31,7 +32,7 @@ function eval_moment_Wass(
         # define the polynomial objective
         p = sum((loss.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
         # define the SOS optimization model
-        model = SOSModel(DEFAULT_SDP)
+        model = SOSModel(solver)
         @variable(model, optval)
         @objective(model, Min, optval)
         @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate, maxdegree=relaxdeg)
@@ -82,17 +83,18 @@ function eval_moment_Wass(
         wassinfo::WassInfo;
         relaxdeg::Int = 0,
         flag_rad_prod = false,
+        flag_lin_prod = false,
         flag_all_prod = false,
-        val_add_bound = -1.0,
+        val_add_bound = 2.0,
+        solver = DEFAULT_SDP,
         val_relax_tol = VAL_TOL,
-        str_sos_approx = "SOS" # DSOS or SDSOS
     )
     N = length(samples)
     cuts = Vector{Float64}[]
     # set the default relaxation degree
     if relaxdeg <= 0
         deg_A = maximum(maxdegree.(recourse.A))
-        deg_C = maximum(maxdegree.(recourse.C)) + 1
+        deg_C = maximum(maxdegree.(recourse.C))
         deg_b = maximum(maxdegree.(recourse.b))
         deg_Ξ = 0
         if recourse.Ξ.V != FullSpace()
@@ -100,7 +102,7 @@ function eval_moment_Wass(
         else
             deg_Ξ = maximum(maxdegree.(recourse.Ξ.p))
         end
-        relaxdeg = maximum([deg_A+2, deg_b+2, deg_C, deg_Ξ, wassinfo.p])
+        relaxdeg = maximum([deg_A,deg_b,deg_C,deg_Ξ,wassinfo.p])
     end
     # alias the augmented state
     x̄ = augstate[1:end-1]
@@ -125,24 +127,18 @@ function eval_moment_Wass(
             m = length(recourse.b)
             S = intersect(S, basic_semialgebraic_set(FullSpace(), [(recourse.A*recourse.y-recourse.b)[i]*(R2-p2) for i in 1:m]))
         end
+        if flag_lin_prod
+            m = length(recourse.b)
+            Y = recourse.A*recourse.y-recourse.b
+            S = intersect(S, basic_semialgebraic_set(FullSpace(), [Y[i]*Y[j] for i in 1:m for j in i:m]))
+        end
         if val_add_bound > 0.0
             B = val_add_bound
             n = length(recourse.y)
-            S = intersect(S, basic_semialgebraic_set(FullSpace(), [[B-recourse.y[i] for i in 1:n];
-                                                                   [B+recourse.y[i] for i in 1:n]]))
+            S = intersect(S, basic_semialgebraic_set(FullSpace(), [B^2-recourse.y[i]^2 for i in 1:n]))
         end
         # define the SOS optimization model
-        model = SOSModel()
-        # check the SOS approximation cone
-        if str_sos_approx == "SOS"
-            set_optimizer(model, DEFAULT_SDP)
-        elseif str_sos_approx == "DSOS"
-            PolyJuMP.setdefault!(model, PolyJuMP.NonNegPoly, DSOSCone)
-            set_optimizer(model, DEFAULT_LP)
-        elseif str_sos_approx == "SDSOS"
-            PolyJuMP.setdefault!(model, PolyJuMP.NonNegPoly, SDSOSCone)
-            set_optimizer(model, DEFAULT_SOCP)
-        end
+        model = SOSModel(solver)
         @variable(model, optval)
         @objective(model, Min, optval)
         if flag_all_prod
@@ -155,26 +151,24 @@ function eval_moment_Wass(
         if is_solved_and_feasible(model, allow_almost=true)
             μ̄ = moments(constr)
             # retrieve the pseudo-expectations for the polynomials
-            Ĉ = map(m->expectation(μ̄,m), recourse.C)
-            ŷ = map(m->expectation(μ̄,m), recourse.y)
+            ĉ = map(m->expectation(μ̄,m), recourse.C*[1;recourse.y])
             p̂ = expectation(μ̄,p)
             # store the cut
-            push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+            push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
         elseif termination_status(model) == SLOW_PROGRESS
             println("DEBUG: slow progress reported by the solver...")
             μ̄ = moments(constr)
             # retrieve the pseudo-expectations for the polynomials
-            Ĉ = map(m->expectation(μ̄,m), recourse.C)
-            ŷ = map(m->expectation(μ̄,m), recourse.y)
+            ĉ = map(m->expectation(μ̄,m), recourse.C*[1;recourse.y])
             p̂ = expectation(μ̄,p)
             # check if the objective values agree
             v̄ = objective_value(model)
-            v̂ = [1;x̄]'*Ĉ*[1;ŷ]-w̄*p̂
+            v̂ = [1;x̄]'*ĉ-w̄*p̂
             if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
-                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+                push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
             else
                 println("DEBUG: The recourse evaluation error is ", v̄-v̂)
-                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+                push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
             end
         else
             println("DEBUG: the moment relaxation degree is ", relaxdeg)

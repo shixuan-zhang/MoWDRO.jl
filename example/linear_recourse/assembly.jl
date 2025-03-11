@@ -23,8 +23,8 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_PART = 5
-const NUM_PROD = 5
+const NUM_PART = 20 
+const NUM_PROD = 20
 const PRICE_MIN = 1.0
 const PRICE_MAX = 2.0
 const COST_MAX = 0.8
@@ -33,7 +33,7 @@ const LATE_RATIO = 2.0
 const SALVAGE_RATIO = 0.5
 const DEMAND_MAX = 2.0
 const NUM_SAMPLE = 20 
-const DEG_WASS = 4
+const DEG_WASS = 2
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
                    WassInfo(1.0e-2,DEG_WASS),
                    WassInfo(2.0e-2,DEG_WASS),
@@ -93,15 +93,15 @@ function experiment_assembly(
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
     b = [s; -g; r; -r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
     Ξ = basic_semialgebraic_set(FullSpace(), 
-                                [[ξ[i] for i in 1:m];
-                                 [1-ξ[i] for i in 1:m]
+                                [#[ξ[i]*(1-ξ[i]) for i in 1:m];
+                                 #[1-ξ[i] for i in 1:m]
+                                 ξ[i]*(1-ξ[i]) for i in 1:m
                                 ])
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ)
     # print the problem information
     println("Start the experiment on the two-stage product assembly problem...")
     println("The number of assembly parts is ", n)
     println("The number of products is ", m)
-    println("The assembly coefficient matrix is\n", P)
     println("The regular prices are ", r)
     println("The salvage prices are ", s)
     println("The late purchase prices are ", g)

@@ -3,6 +3,7 @@
 # s.t. (x,u) ∈ Feasible Set, w ≥ 0.
 
 # Artificial upper bound on w is needed for convergence.
+const VAL_GAP = 1.0e-2
 const VAL_BOUND = 1.0e6
 const VAL_LEVEL = 0.5
 const VAL_POS_DUAL = 1.0e-2
@@ -13,7 +14,7 @@ function solve_main_level(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo = WassInfo(.0,2);
         max_iter::Int = NUM_MAX_ITER,
-        opt_gap::Float64 = VAL_TOL,
+        opt_gap::Float64 = VAL_GAP,
         max_aux::Float64 = VAL_BOUND,
         min_aux::Float64 = VAL_POS_DUAL,
         level::Float64 = VAL_LEVEL,
@@ -124,6 +125,9 @@ function solve_main_level(
                 printfmtln(" The level bundle method does not converge within {} iterations", max_iter)
             end
             return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
+        end
+        if max_obj - min_obj < -opt_gap
+            error("Invalid upper or lower bound in the level method!")
         end
     end
     if print
