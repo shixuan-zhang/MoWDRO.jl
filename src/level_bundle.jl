@@ -18,7 +18,8 @@ function solve_main_level(
         max_aux::Float64 = VAL_BOUND,
         min_aux::Float64 = VAL_POS_DUAL,
         level::Float64 = VAL_LEVEL,
-        print::Bool = false
+        mom_solver = DEFAULT_SDP,
+        print::Int = 1
     )::MainSolution where T <: SampleSubproblem
     # check if Wasserstein ambiguity is needed
     flag_Wass = false
@@ -51,7 +52,7 @@ function solve_main_level(
     # get the initial upper bound
     cut = zeros(dim_x+2)
     if flag_Wass
-        cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo)
+        cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo, mom_solver=mom_solver, print=print-1)
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
     end
@@ -63,7 +64,7 @@ function solve_main_level(
     opt_f = val_f
     opt_ϕ = val_ϕ
     # print the starting message
-    if print
+    if print > 0
         println(" Start the level bundle method for the main problem...")
         println(" The initial lower bound = ", min_obj)
         println(" The initial upper bound = ", max_obj)
@@ -94,7 +95,7 @@ function solve_main_level(
         # get an updated upper bound
         cut = zeros(dim_x+2)
         if flag_Wass
-            cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo)
+            cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo, mom_solver=mom_solver, print=print-1)
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
         end
@@ -114,14 +115,14 @@ function solve_main_level(
         optimize!(main.model)
         min_obj = objective_value(main.model)
         # print the update if needed
-        if print
+        if print > 0
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
                        iter, val_ϕ+val_f, max_obj, min_obj)
         end
         iter += 1
         # check if maximum number of iteration is reached
         if iter > max_iter
-            if print
+            if print > 0
                 printfmtln(" The level bundle method does not converge within {} iterations", max_iter)
             end
             return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
@@ -130,7 +131,7 @@ function solve_main_level(
             error("Invalid upper or lower bound in the level method!")
         end
     end
-    if print
+    if print > 0
         printfmtln(" The level bundle method has converged within {} iteration(s)", iter)
     end
     return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)

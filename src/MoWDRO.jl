@@ -2,15 +2,13 @@
 module MoWDRO
 
 # import basic mathematics and statistics modules
-using LinearAlgebra, Random, Statistics
-using DynamicPolynomials, SumOfSquares, SemialgebraicSets
+using LinearAlgebra, DynamicPolynomials, SumOfSquares, SemialgebraicSets, MultivariateMoments
 using JuMP, PolyJuMP
 using Format
 # set default solvers
-import HiGHS, CSDP, Mosek, MosekTools
-const DEFAULT_LP = optimizer_with_attributes(HiGHS.Optimizer, MOI.Silent() => true)
-const DEFAULT_SDP = optimizer_with_attributes(Mosek.Optimizer, MOI.Silent() => true)
-#const DEFAULT_SDP = optimizer_with_attributes(CSDP.Optimizer, MOI.Silent() => true)
+import HiGHS, CSDP
+const DEFAULT_LP = HiGHS.Optimizer
+const DEFAULT_SDP = CSDP.Optimizer
 
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo
@@ -28,9 +26,6 @@ const NUM_MAX_ITER = 1000
 include("types.jl")
 # define the main methods
 include("methods.jl")
-
-# import alternative certificates
-include("certificates.jl")
 
 # include algorithms and relaxations
 include("moment_relax.jl")

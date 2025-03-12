@@ -55,6 +55,8 @@ struct SampleLinearRecourse <: SampleSubproblem
     b::Vector
     # Semi-algebraic Uncertainty Set
     Ξ::BasicSemialgebraicSet
+    # Recourse Variable Bounds
+    B::Vector
 end
 
 # structure for (first-stage) polynomial loss function F(x,ξ)

@@ -21,10 +21,12 @@ end
 function eval_nominal(
         loss::SamplePolynomialLoss,
         state::Vector{Float64},
-        samples::Vector{Vector{Float64}}
+        samples::Vector{Vector{Float64}};
+        details::Bool = false
     )
     N = length(samples)
     cuts = Vector{Float64}[]
+    vals = Float64[]
     # alias the state vector
     x̄ = state
     # loop over all samples for the loss function evaluation
@@ -34,6 +36,14 @@ function eval_nominal(
         ĝ = convert.(Float64,subs.(loss.∇ₓF,loss.x=>x̄,loss.ξ=>ξ̂))
         # store the cut
         push!(cuts, [v̂-ĝ'*x̄;ĝ])
+        # store the value if needed
+        if details
+            push!(vals, v̂)
+        end
+    end
+    # return the aggregate cut and the nominal values
+    if details
+        return combine_linear_cuts(cuts), vals
     end
     # return the aggregate cut
     return combine_linear_cuts(cuts)
@@ -43,10 +53,12 @@ end
 function eval_nominal(
         recourse::SampleLinearRecourse,
         state::Vector{Float64},
-        samples::Vector{Vector{Float64}}
+        samples::Vector{Vector{Float64}};
+        details::Bool = false
     )
     N = length(samples)
     cuts = Vector{Float64}[]
+    vals = Float64[]
     # loop over all samples for the linear recourse problem
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
@@ -58,6 +70,7 @@ function eval_nominal(
         b = convert.(Float64,subs.(recourse.b,recourse.ξ=>ξ̂))
         # formulate a JuMP linear optimization model
         M = JuMP.Model(DEFAULT_LP)
+        set_silent(M)
         # define the recourse variables and constraints
         @variable(M, y[1:length(c)-1])
         @constraint(M, A*y - b >= 0)
@@ -69,9 +82,17 @@ function eval_nominal(
             ȳ = value.(y)
             # store the cut
             push!(cuts, C*[1;ȳ])
+            # store the value if needed
+            if details
+                push!(vals, objective_value(M))
+            end
         else
             error("The nominal evaluation has failed with status: ", termination_status(M))
         end
+    end
+    # return the aggregate cut and the nominal values
+    if details
+        return combine_linear_cuts(cuts), vals
     end
     # return the aggregate cut
     return combine_linear_cuts(cuts)

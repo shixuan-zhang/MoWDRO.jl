@@ -17,8 +17,8 @@
 #          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s; -g; r; -r; 0]
 
 
-using JuMP, HiGHS
-using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
+using JuMP, HiGHS, Mosek, MosekTools
+using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 include("../../src/MoWDRO.jl")
 using .MoWDRO
 
@@ -32,8 +32,10 @@ const COST_MIN = 0.5
 const LATE_RATIO = 2.0
 const SALVAGE_RATIO = 0.5
 const DEMAND_MAX = 2.0
-const NUM_SAMPLE = 20 
+const NUM_TRAIN = 20 
+const NUM_TEST = 1000
 const DEG_WASS = 2
+const MOM_SOLVER = Mosek.Optimizer
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
                    WassInfo(1.0e-2,DEG_WASS),
                    WassInfo(2.0e-2,DEG_WASS),
@@ -48,7 +50,8 @@ function experiment_assembly(
         n::Int,              # number of parts
         m::Int,              # number of products
         W::Vector{WassInfo}, # list of Wasserstein robustness settings to be used 
-        N::Int = NUM_SAMPLE; # number of samples
+        N::Int = NUM_TRAIN,  # number of training samples
+        M::Int = NUM_TEST;   # number of testing samples
         P::Matrix{Float64} = zeros(0,0), # matrix of assembly coefficients 
         r::Vector{Float64} = zeros(0),   # vector of regular product prices
         f_x::Vector{Float64} = zeros(0), # vector of part costs
@@ -86,18 +89,20 @@ function experiment_assembly(
         s = SALVAGE_RATIO * f_x
     end
     # take the samples of salvage prices and demands
-    samples = [rand(m) for _ in 1:N]
+    sample_train = [rand(m) for _ in 1:N]
+    sample_test = [rand(m) for _ in 1:M]
     # define the two-stage linear recourse function, where ξᵢ represents qᵢ, i = 1,…,m
     @polyvar x[1:n] ξ[1:m] y[1:n+m]
     C = [zeros(n+1)' -D*ξ'; zeros(n) -I zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
     b = [s; -g; r; -r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
-    Ξ = basic_semialgebraic_set(FullSpace(), 
-                                [#[ξ[i]*(1-ξ[i]) for i in 1:m];
-                                 #[1-ξ[i] for i in 1:m]
-                                 ξ[i]*(1-ξ[i]) for i in 1:m
-                                ])
-    recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ)
+    Ξ = basicsemialgebraicset(FullSpace(), 
+                              [[ξ[i] for i in 1:m];
+                               [1-ξ[i] for i in 1:m];
+                               [ξ[i]*(1-ξ[i]) for i in 1:m]
+                              ])
+    B = [g; r]
+    recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
     # print the problem information
     println("Start the experiment on the two-stage product assembly problem...")
     println("The number of assembly parts is ", n)
@@ -105,7 +110,7 @@ function experiment_assembly(
     println("The regular prices are ", r)
     println("The salvage prices are ", s)
     println("The late purchase prices are ", g)
-    println("The number of samples is ", N)
+    println("The number of training samples is ", N)
     println("The first-stage cost function is ", f_x'*x)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
     println("The second-stage constraints are ", A*y - b)
@@ -121,13 +126,17 @@ function experiment_assembly(
         main = MainProblem(model, x, VariableRef[], w, ϕ, f_x, Float64[])
         # solve the problem
         time_start = time()
-        sol = solve_main_level(main, recourse, samples, wassinfo, print=true)
+        sol = solve_main_level(main, recourse, sample_train, wassinfo, print=1, mom_solver=MOM_SOLVER)
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
         println("f = ", sol.f)
         println("ϕ = ", sol.ϕ)
         println("The total computation time is ", time()-time_start)
-        println()
+        println("Start the out-of-sample test for the solution...")
+        # evaluate the out-of-sample performance
+        _, vals = eval_nominal(recourse, sol.x, sample_test, details=true)
+        println("The testing sample mean = ", mean(vals .+ f_x'*sol.x))
+        println("The testing sample variance = ", var(vals))
     end
 end
 

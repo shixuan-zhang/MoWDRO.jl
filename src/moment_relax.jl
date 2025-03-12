@@ -7,9 +7,10 @@ function eval_moment_Wass(
         augstate::Vector{Float64},
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
+        print::Int = 0,
         relaxdeg::Int = 0,
-        solver = DEFAULT_SDP,
-        val_relax_tol = VAL_TOL
+        mom_solver = DEFAULT_SDP,
+        val_relax_tol::Float64 = VAL_TOL
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -22,9 +23,6 @@ function eval_moment_Wass(
     if relaxdeg <= 0
         relaxdeg = max(maxdegree(f),wassinfo.p)
     end
-    # define the Schmüdgen certificate for moment relaxation
-    ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
-    certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
     # loop over all samples for the loss function moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
@@ -32,10 +30,13 @@ function eval_moment_Wass(
         # define the polynomial objective
         p = sum((loss.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
         # define the SOS optimization model
-        model = SOSModel(solver)
+        model = SOSModel(mom_solver)
+        if print < 1
+            set_silent(model)
+        end
         @variable(model, optval)
         @objective(model, Min, optval)
-        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, certificate=certificate, maxdegree=relaxdeg)
+        @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, maxdegree=relaxdeg)
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
         # retrieve the pseudo-expectations for the polynomials
@@ -45,21 +46,23 @@ function eval_moment_Wass(
             p̂ = expectation(μ̄,p)
             ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
             # store the cut
-            push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r-p̂])
+            push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂])
         elseif termination_status(model) == SLOW_PROGRESS
-            println("DEBUG: slow progress reported by the solver...")
+            if print > 0
+                println("DEBUG: slow progress reported by the solver...")
+            end
             μ̄ = moments(constr)
             v̂ = expectation(μ̄,f)
             p̂ = expectation(μ̄,p)
             ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
             v̄ = objective_value(model)
             v̂ = v̂-w̄*p̂
-            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
-                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
-            else
-                println("DEBUG: The loss function evaluation error is ", v̄-v̂)
-                push!(cuts, [Ĉ*[1;ŷ];wassinfo.r^wassinfo.p-p̂])
+            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) > val_relax_tol
+                if print > 0
+                    println("DEBUG: The loss function evaluation error is ", v̄-v̂)
+                end
             end
+            push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂])
         else 
             println("DEBUG: the moment relaxation degree is ", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
@@ -81,13 +84,13 @@ function eval_moment_Wass(
         augstate::Vector{Float64},
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
+        print::Int = 0,
         relaxdeg::Int = 0,
-        flag_rad_prod = false,
-        flag_lin_prod = false,
-        flag_all_prod = false,
-        val_add_bound = 2.0,
-        solver = DEFAULT_SDP,
-        val_relax_tol = VAL_TOL,
+        flag_rad_prod::Bool = false,
+        flag_lin_prod::Bool = false,
+        val_add_bound::Float64 = -1.0,
+        mom_solver = DEFAULT_SDP,
+        val_relax_tol::Float64 = VAL_TOL
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -107,11 +110,6 @@ function eval_moment_Wass(
     # alias the augmented state
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
-    # define the Schmüdgen type certificate
-    if flag_all_prod
-        ideal_certificate = SOSC.Newton(SOSCone(), MB.MonomialBasis, tuple())
-        certificate = Schmüdgen(ideal_certificate, SOSCone(), MB.MonomialBasis, relaxdeg)
-    end
     # loop over all samples for the linear recourse moment relaxation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
@@ -120,32 +118,36 @@ function eval_moment_Wass(
         p = sum((recourse.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
         f = [1;x̄]'*recourse.C*[1;recourse.y] - w̄*p
         # define the semi-algebraic set
-        S = intersect(recourse.Ξ, basic_semialgebraic_set(FullSpace(), recourse.A*recourse.y-recourse.b))
+        Y = basicsemialgebraicset(FullSpace(), recourse.A*recourse.y-recourse.b)
+        if minimum(recourse.B) > 0.0
+            m = length(recourse.y)
+            Y = intersect(Y, basicsemialgebraicset(FullSpace(), [recourse.B[i]^2-recourse.y[i]^2 for i in 1:m]))
+        end
+        S = intersect(recourse.Ξ, Y)
         if flag_rad_prod
             R2 = (wassinfo.r^wassinfo.p*N)^(2/wassinfo.p)
             p2 = (recourse.ξ-ξ̂)'*(recourse.ξ-ξ̂)
             m = length(recourse.b)
-            S = intersect(S, basic_semialgebraic_set(FullSpace(), [(recourse.A*recourse.y-recourse.b)[i]*(R2-p2) for i in 1:m]))
+            S = intersect(S, basicsemialgebraicset(FullSpace(), [(recourse.A*recourse.y-recourse.b)[i]*(R2-p2) for i in 1:m]))
         end
         if flag_lin_prod
             m = length(recourse.b)
             Y = recourse.A*recourse.y-recourse.b
-            S = intersect(S, basic_semialgebraic_set(FullSpace(), [Y[i]*Y[j] for i in 1:m for j in i:m]))
+            S = intersect(S, basicsemialgebraicset(FullSpace(), [Y[i]*Y[j] for i in 1:m for j in i:m]))
         end
         if val_add_bound > 0.0
             B = val_add_bound
             n = length(recourse.y)
-            S = intersect(S, basic_semialgebraic_set(FullSpace(), [B^2-recourse.y[i]^2 for i in 1:n]))
+            S = intersect(S, basicsemialgebraicset(FullSpace(), [B^2-recourse.y[i]^2 for i in 1:n]))
         end
         # define the SOS optimization model
-        model = SOSModel(solver)
+        model = SOSModel(mom_solver)
+        if print < 1
+            set_silent(model)
+        end
         @variable(model, optval)
         @objective(model, Min, optval)
-        if flag_all_prod
-            @constraint(model, constr, optval >= f, domain=S, certificate=certificate, maxdegree=relaxdeg)
-        else
-            @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)
-        end
+        @constraint(model, constr, optval >= f, domain=S, maxdegree=relaxdeg)
         # solve the SOS model and extract the (pseudo-)moments/measure
         optimize!(model)
         if is_solved_and_feasible(model, allow_almost=true)
@@ -156,7 +158,9 @@ function eval_moment_Wass(
             # store the cut
             push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
         elseif termination_status(model) == SLOW_PROGRESS
-            println("DEBUG: slow progress reported by the solver...")
+            if print > 0
+                println("DEBUG: slow progress reported by the solver...")
+            end
             μ̄ = moments(constr)
             # retrieve the pseudo-expectations for the polynomials
             ĉ = map(m->expectation(μ̄,m), recourse.C*[1;recourse.y])
@@ -164,12 +168,12 @@ function eval_moment_Wass(
             # check if the objective values agree
             v̄ = objective_value(model)
             v̂ = [1;x̄]'*ĉ-w̄*p̂
-            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) < val_relax_tol
-                push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
-            else
-                println("DEBUG: The recourse evaluation error is ", v̄-v̂)
-                push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
+            if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) > val_relax_tol
+                if print > 0
+                    println("DEBUG: The recourse evaluation error is ", v̄-v̂)
+                end
             end
+            push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
         else
             println("DEBUG: the moment relaxation degree is ", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", S)

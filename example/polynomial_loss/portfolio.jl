@@ -15,14 +15,14 @@ const NUM_VAR = 5
 const NUM_FAC = 10
 const DEG_LOSS = 2
 const NUM_SAMPLE = 20 
-const WASS_INFO = [WassInfo(0.0,2),
-                   WassInfo(1e-2,2),
-                   WassInfo(2e-2,2),
-                   WassInfo(5e-2,2),
-                   WassInfo(1e-1,2),
-                   WassInfo(2e-1,2),
-                   WassInfo(5e-1,2),
-                   WassInfo(1.0,2)]
+const WASS_INFO = [WassInfo(0.0,DEG_LOSS),
+                   WassInfo(1e-2,DEG_LOSS),
+                   WassInfo(2e-2,DEG_LOSS),
+                   WassInfo(5e-2,DEG_LOSS),
+                   WassInfo(1e-1,DEG_LOSS),
+                   WassInfo(2e-1,DEG_LOSS),
+                   WassInfo(5e-1,DEG_LOSS),
+                   WassInfo(1.0,DEG_LOSS)]
 
 
 # function that conducts the experiment on the portfolio examples
@@ -59,7 +59,9 @@ function experiment_portfolio(
     @polyvar x[1:n] ξ[1:n]
     F = sum(C[i]*(x'*ξ)^i for i in 1:k)
     ∇ₓF = differentiate(F,x)
-    Ξ = basic_semialgebraic_set(FullSpace(), [[ξ[i] for i in 1:n]; [1-ξ[i] for i in 1:n]])
+    Ξ = basicsemialgebraicset(FullSpace(), [[ξ[i]*(1-ξ[i]) for i in 1:n];
+                                            [ξ[i] for i in 1:n];
+                                            [1-ξ[i] for i in 1:n]])
     loss = SamplePolynomialLoss(x, ξ, F, ∇ₓF, Ξ)
     # print the problem information
     println("Start the experiment on the portfolio management problem...")
@@ -81,7 +83,7 @@ function experiment_portfolio(
         @constraint(model, ones(n)'*x == 1)
         main = MainProblem(model, x, VariableRef[], w, ϕ, f_x, Float64[])
         # solve the problem
-        sol = solve_main_level(main, loss, samples, wassinfo, print=true)
+        sol = solve_main_level(main, loss, samples, wassinfo, print=1)
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
         println("f = ", sol.f)
