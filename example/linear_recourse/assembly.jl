@@ -31,18 +31,21 @@ const COST_MAX = 0.8
 const COST_MIN = 0.5
 const LATE_RATIO = 2.0
 const SALVAGE_RATIO = 0.5
-const DEMAND_MAX = 2.0
+const DEMAND_MAX = 5.0
 const NUM_TRAIN = 20 
 const NUM_TEST = 1000
 const DEG_WASS = 2
 const MOM_SOLVER = Mosek.Optimizer
 const WASS_INFO = [WassInfo(0.0,DEG_WASS),
-                   WassInfo(1.0e-2,DEG_WASS),
-                   WassInfo(2.0e-2,DEG_WASS),
-                   WassInfo(5.0e-2,DEG_WASS),
                    WassInfo(1.0e-1,DEG_WASS),
                    WassInfo(2.0e-1,DEG_WASS),
+                   WassInfo(3.0e-1,DEG_WASS),
+                   WassInfo(4.0e-1,DEG_WASS),
                    WassInfo(5.0e-1,DEG_WASS),
+                   WassInfo(6.0e-1,DEG_WASS),
+                   WassInfo(7.0e-1,DEG_WASS),
+                   WassInfo(8.0e-1,DEG_WASS),
+                   WassInfo(9.0e-1,DEG_WASS),
                    WassInfo(1.0,DEG_WASS)]
 
 # function that conducts experiments on the multiproduct assembly problem
@@ -131,12 +134,14 @@ function experiment_assembly(
         println("x = ", sol.x)
         println("f = ", sol.f)
         println("ϕ = ", sol.ϕ)
+        println("The training sample objective = ", sol.f+sol.ϕ)
         println("The total computation time is ", time()-time_start)
         println("Start the out-of-sample test for the solution...")
         # evaluate the out-of-sample performance
         _, vals = eval_nominal(recourse, sol.x, sample_test, details=true)
-        println("The testing sample mean = ", mean(vals .+ f_x'*sol.x))
-        println("The testing sample variance = ", var(vals))
+        println("The testing sample mean = ", mean(vals)+sol.f)
+        println("The testing sample variance = ", std(vals))
+        println("\n\n")
     end
 end
 
