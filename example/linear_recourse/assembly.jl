@@ -26,27 +26,44 @@ using .MoWDRO
 const NUM_PART = 20 
 const NUM_PROD = 20
 const PRICE_MIN = 1.0
-const PRICE_MAX = 2.0
-const COST_MAX = 0.8
-const COST_MIN = 0.5
-const LATE_RATIO = 2.0
-const SALVAGE_RATIO = 0.5
-const DEMAND_MAX = 5.0
-const NUM_TRAIN = 20 
+const PRICE_MAX = 5.0
+const COST_MAX = 1.0
+const COST_MIN = 0.8
+const LATE_RATIO = 3.0
+const SALV_RATIO = 0.5
+const DEMAND_MAX = 2.0
+const DEMAND_DIFF = 0.4
+const NUM_TRAIN = 10 
 const NUM_TEST = 1000
-const DEG_WASS = 2
 const MOM_SOLVER = Mosek.Optimizer
-const WASS_INFO = [WassInfo(0.0,DEG_WASS),
-                   WassInfo(1.0e-1,DEG_WASS),
-                   WassInfo(2.0e-1,DEG_WASS),
-                   WassInfo(3.0e-1,DEG_WASS),
-                   WassInfo(4.0e-1,DEG_WASS),
-                   WassInfo(5.0e-1,DEG_WASS),
-                   WassInfo(6.0e-1,DEG_WASS),
-                   WassInfo(7.0e-1,DEG_WASS),
-                   WassInfo(8.0e-1,DEG_WASS),
-                   WassInfo(9.0e-1,DEG_WASS),
-                   WassInfo(1.0,DEG_WASS)]
+const DEG_WASS = 2
+const WASS_INFO = [WassInfo(i*1.0e-2,DEG_WASS) for i in 0:20]
+
+# function to generate correlated demand data (scaled to be between [0,1])
+function generate_data(
+        m::Int;                   # number of products
+        δ::Float64 = DEMAND_DIFF, # range of adjacent entries
+        k::Int = 0,               # starting index for the correlation
+    )
+    if k <= 0
+        k = ceil(Int,m/2)
+    end
+    d = zeros(m)
+    d[k] = rand()
+    for i = 1:(m-1)
+        i1 = 1+(k+i-2)%m
+        i2 = 1+(k+i-1)%m
+        lb = 0.0
+        ub = 1.0
+        if d[i1] >= 0.5
+            lb = max(d[i1]-δ, 0.0)
+        else
+            ub = min(d[i1]+δ, 1.0)
+        end
+        d[i2] = lb + (ub-lb)*rand()
+    end
+    return d
+end
 
 # function that conducts experiments on the multiproduct assembly problem
 function experiment_assembly(
@@ -66,8 +83,11 @@ function experiment_assembly(
     if size(P) != (n,m)
         P = zeros(n,m)
         for j = 1:m
+            for i =1:(j-1)
+                P[i,j] = 1/(j-1) * 0.2
+            end
             for i = j:n
-                P[i,j] = 1/(n+1-j)
+                P[i,j] = 1/(n+1-j) * 0.8
             end
         end
     end
@@ -89,11 +109,11 @@ function experiment_assembly(
         g = LATE_RATIO * f_x
     end
     if length(s) != n
-        s = SALVAGE_RATIO * f_x
+        s = SALV_RATIO * f_x
     end
     # take the samples of salvage prices and demands
-    sample_train = [rand(m) for _ in 1:N]
-    sample_test = [rand(m) for _ in 1:M]
+    sample_train = [generate_data(m) for _ in 1:N]
+    sample_test = [generate_data(m) for _ in 1:M]
     # define the two-stage linear recourse function, where ξᵢ represents qᵢ, i = 1,…,m
     @polyvar x[1:n] ξ[1:m] y[1:n+m]
     C = [zeros(n+1)' -D*ξ'; zeros(n) -I zeros(n,m)]
@@ -140,7 +160,7 @@ function experiment_assembly(
         # evaluate the out-of-sample performance
         _, vals = eval_nominal(recourse, sol.x, sample_test, details=true)
         println("The testing sample mean = ", mean(vals)+sol.f)
-        println("The testing sample variance = ", std(vals))
+        println("The testing sample standard deviation = ", std(vals))
         println("\n\n")
     end
 end
