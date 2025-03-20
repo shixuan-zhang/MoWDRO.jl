@@ -2,81 +2,59 @@
 # (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,1]ⁿ, where fₓ ∈ [0,1]ⁿ, and 
 # F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
-#           s.t. wⱼ - uⱼ = xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j,
-#                0 ≤ zᵢ ≤ qᵢ(ξ),           ∀ i,
-#                wⱼ, uⱼ ≥ 0,               ∀ j.
+#           s.t. wⱼ - uⱼ = tⱼ(ξ)⋅xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j,
+#                0 ≤ zᵢ ≤ qᵢ(ξ),                 ∀ i,
+#                wⱼ, uⱼ ≥ 0,                     ∀ j.
 # Here, rᵢ > 0 is the regular price, 
 # sᵢ is the salvage price,
-# gⱼ is the late price for part purchasing,
-# pᵢⱼ is the percentage of part j in product i,
-# qᵢ(ξ) ∼ Uniform(0,Dᵢ) is the random demand with an 
-# upper bound Dᵢ > 0.
+# gⱼ is the late price for ingredient purchasing,
+# pᵢⱼ is the percentage of ingredient j in product i,
+# tⱼ(ξ) ∼ Uniform(0,1) is the random spoilage 
+# percentage for ingredient j, 
+# qᵢ(ξ) ∼ Uniform(0,1) is the random demand factor, so 
+# that the total demand is qᵢ⋅D for some D > 0.
 # By linear duality, we can write F alternatively as
-# F(x,ξ) = max  -(xᵀ, q(ξ)ᵀ)⋅y 
-#               = (1,x)ᵀ⋅[0  0 -q(ξ)ᵀ; 0 -I 0]⋅(1,y)
-#          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s; -g; r; -r; 0]
+# F(x,ξ) = max  -(t⋅xᵀ, q(ξ)ᵀ)⋅y 
+#               = (1,x)ᵀ⋅[0  0 -q(ξ)ᵀ; 0 -diag(t) 0]⋅(1,y)
+#          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
 
 
 using JuMP, HiGHS, Mosek, MosekTools
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
+using DataFrames, CSV
 include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_PART = 20 
-const NUM_PROD = 20
+const NUM_PART = 10 
+const NUM_PROD = 10
 const PRICE_MIN = 1.0
-const PRICE_MAX = 5.0
+const PRICE_MAX = 3.0
 const COST_MAX = 1.0
-const COST_MIN = 0.8
+const COST_MIN = 0.5
 const LATE_RATIO = 3.0
-const SALV_RATIO = 0.5
-const DEMAND_MAX = 2.0
-const DEMAND_DIFF = 0.4
+const SALVAGE_MAX = 0.9
+const DEMAND_MAX = NUM_PROD / 2.0
 const NUM_TRAIN = 10 
 const NUM_TEST = 1000
 const MOM_SOLVER = Mosek.Optimizer
 const DEG_WASS = 2
-const WASS_INFO = [WassInfo(i*1.0e-2,DEG_WASS) for i in 0:20]
+const WASS_INFO = [WassInfo(i*5.0e-2,DEG_WASS) for i in 0:20]
 
-# function to generate correlated demand data (scaled to be between [0,1])
-function generate_data(
-        m::Int;                   # number of products
-        δ::Float64 = DEMAND_DIFF, # range of adjacent entries
-        k::Int = 0,               # starting index for the correlation
-    )
-    if k <= 0
-        k = ceil(Int,m/2)
-    end
-    d = zeros(m)
-    d[k] = rand()
-    for i = 1:(m-1)
-        i1 = 1+(k+i-2)%m
-        i2 = 1+(k+i-1)%m
-        lb = 0.0
-        ub = 1.0
-        if d[i1] >= 0.5
-            lb = max(d[i1]-δ, 0.0)
-        else
-            ub = min(d[i1]+δ, 1.0)
-        end
-        d[i2] = lb + (ub-lb)*rand()
-    end
-    return d
-end
+const OUTPUT_FILE = "../result_assembly_$(NUM_PART)_$(NUM_PROD).csv"
 
 # function that conducts experiments on the multiproduct assembly problem
 function experiment_assembly(
-        n::Int,              # number of parts
+        n::Int,              # number of ingredients
         m::Int,              # number of products
         W::Vector{WassInfo}, # list of Wasserstein robustness settings to be used 
         N::Int = NUM_TRAIN,  # number of training samples
         M::Int = NUM_TEST;   # number of testing samples
         P::Matrix{Float64} = zeros(0,0), # matrix of assembly coefficients 
         r::Vector{Float64} = zeros(0),   # vector of regular product prices
-        f_x::Vector{Float64} = zeros(0), # vector of part costs
-        g::Vector{Float64} = zeros(0),   # vector of late part costs
-        s::Vector{Float64} = zeros(0),   # vector of part salvage prices
+        f_x::Vector{Float64} = zeros(0), # vector of ingredient costs
+        g::Vector{Float64} = zeros(0),   # vector of late ingredient costs
+        s::Vector{Float64} = zeros(0),   # vector of ingredient salvage prices
         D::Float64 = DEMAND_MAX,         # bound on the demands
     )
     # check if the assembly coefficients are supplied
@@ -98,7 +76,7 @@ function experiment_assembly(
             r[j] = PRICE_MIN + (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1)
         end
     end
-    # check if the part prices are supplied
+    # check if the ingredient prices are supplied
     if length(f_x) != n
         f_x = zeros(n)
         for i = 1:n
@@ -109,16 +87,17 @@ function experiment_assembly(
         g = LATE_RATIO * f_x
     end
     if length(s) != n
-        s = SALV_RATIO * f_x
+        s = SALVAGE_MAX * f_x
     end
     # take the samples of salvage prices and demands
-    sample_train = [generate_data(m) for _ in 1:N]
-    sample_test = [generate_data(m) for _ in 1:M]
-    # define the two-stage linear recourse function, where ξᵢ represents qᵢ, i = 1,…,m
-    @polyvar x[1:n] ξ[1:m] y[1:n+m]
-    C = [zeros(n+1)' -D*ξ'; zeros(n) -I zeros(n,m)]
+    sample_train = [rand(m+2*n) for _ in 1:N]
+    sample_test = [rand(m+2*n) for _ in 1:M]
+    # define the two-stage linear recourse function, 
+    # where ξᵢ represents qᵢ, i = 1,…,m, ξⱼ for tⱼ, j = m+1,…,m+n, ξⱼ for sⱼ, j = m+n+1,…,m+2n.
+    @polyvar x[1:n] ξ[1:m+2*n] y[1:n+m]
+    C = [zeros(n+1)' -D*ξ[1:m]'; zeros(n) -Diagonal(ξ[m+1:m+n]) zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [s; -g; r; -r; zeros(m)] .+ 0.0*sum(ξ) # to promote the type
+    b = [s.*ξ[m+n+1:m+2*n]; -g; r; -r; zeros(m)]
     Ξ = basicsemialgebraicset(FullSpace(), 
                               [[ξ[i] for i in 1:m];
                                [1-ξ[i] for i in 1:m];
@@ -128,7 +107,7 @@ function experiment_assembly(
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
     # print the problem information
     println("Start the experiment on the two-stage product assembly problem...")
-    println("The number of assembly parts is ", n)
+    println("The number of ingredient is ", n)
     println("The number of products is ", m)
     println("The regular prices are ", r)
     println("The salvage prices are ", s)
@@ -138,6 +117,16 @@ function experiment_assembly(
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
     println("The second-stage constraints are ", A*y - b)
     println()
+    # prepare the table for output
+    WASS_RAD   = Float64[]
+    WASS_DEG   = Int[]
+    TRAIN_OBJ  = Float64[]
+    TRAIN_TIME = Float64[]
+    TEST_MEAN  = Float64[]
+    TEST_STD   = Float64[]
+    TEST_MED   = Float64[]
+    TEST_Q90   = Float64[]
+    TEST_Q10   = Float64[]
     # loop over all Wasserstein robustness settings
     for wassinfo in W
         # define the main linear optimization problem 
@@ -150,17 +139,40 @@ function experiment_assembly(
         # solve the problem
         time_start = time()
         sol = solve_main_level(main, recourse, sample_train, wassinfo, print=1, mom_solver=MOM_SOLVER)
+        time_finish = time()
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
         println("f = ", sol.f)
         println("ϕ = ", sol.ϕ)
         println("The training sample objective = ", sol.f+sol.ϕ)
-        println("The total computation time is ", time()-time_start)
+        println("The total computation time is ", time_finish-time_start)
         println("Start the out-of-sample test for the solution...")
         # evaluate the out-of-sample performance
         _, vals = eval_nominal(recourse, sol.x, sample_test, details=true)
         println("The testing sample mean = ", mean(vals)+sol.f)
         println("The testing sample standard deviation = ", std(vals))
+        # update the output file
+        append!(WASS_DEG, wassinfo.p)
+        append!(WASS_RAD, wassinfo.r)
+        append!(TRAIN_TIME, time_finish-time_start)
+        append!(TRAIN_OBJ, sol.f+sol.ϕ)
+        append!(TEST_MEAN, mean(vals)+sol.f)
+        append!(TEST_STD, std(vals))
+        vec_quant = quantile(vals, [0.1,0.5,0.9])
+        append!(TEST_Q10, vec_quant[1])
+        append!(TEST_MED, vec_quant[2])
+        append!(TEST_Q90, vec_quant[3])
+        output = DataFrame(:WASS_DEG   => WASS_DEG,
+                           :WASS_RAD   => WASS_RAD,
+                           :TRAIN_TIME => TRAIN_TIME,
+                           :TRAIN_OBJ  => TRAIN_OBJ,
+                           :TEST_MEAN  => TEST_MEAN,
+                           :TEST_STD   => TEST_STD,
+                           :TEST_Q10   => TEST_Q10,
+                           :TEST_MED   => TEST_MED,
+                           :TEST_Q90   => TEST_Q90)
+        CSV.write(OUTPUT_FILE, output)
+        println("Update the result in ", OUTPUT_FILE)
         println("\n\n")
     end
 end
