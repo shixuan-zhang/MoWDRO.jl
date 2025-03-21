@@ -74,6 +74,17 @@ function solve_main_level(
     while max_obj - min_obj > opt_gap
         # update the loss/recourse approximation
         @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
+        # get an updated lower bound
+        optimize!(main.model)
+        if termination_status(main.model) != OPTIMAL && !has_values(main.model)
+            println("DEBUG: the current level bounding step problem x = ", sol_x)
+            if flag_Wass
+                println("DEBUG: the current level bounding step problem w = ", sol_w)
+            end
+            println("DEBUG: the current level bounding step model is \n", main.model)
+            error("The level method bounding step has failed with status: ", termination_status(main.model))
+        end
+        min_obj = objective_value(main.model)
         # calculate the level
         val_lev = level*max_obj + (1-level)*min_obj
         # build the projection model
@@ -85,6 +96,14 @@ function solve_main_level(
         @objective(main.model, Min, obj_proj)
         # find the next iterate
         optimize!(main.model)
+        if termination_status(main.model) != OPTIMAL && !has_values(main.model)
+            println("DEBUG: the current level projection step problem x = ", sol_x)
+            if flag_Wass
+                println("DEBUG: the current level projection step problem w = ", sol_w)
+            end
+            println("DEBUG: the current level projection step problem model is \n", main.model)
+            error("The level method projection step has failed with status: ", termination_status(main.model))
+        end
         sol_x = value.(main.x)
         sol_u = value.(main.u)
         sol_w = 0.0
@@ -111,9 +130,6 @@ function solve_main_level(
         # restore the optimization model
         delete(main.model, con_proj)
         @objective(main.model, Min, obj)
-        # get an updated lower bound
-        optimize!(main.model)
-        min_obj = objective_value(main.model)
         # print the update if needed
         if print > 0
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",

@@ -19,7 +19,8 @@
 #          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
 
 
-using JuMP, HiGHS, Mosek, MosekTools
+using JuMP, HiGHS 
+using Mosek, MosekTools
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
 include("../../src/MoWDRO.jl")
@@ -28,18 +29,20 @@ using .MoWDRO
 # experiment parameters
 const NUM_PART = 10 
 const NUM_PROD = 10
-const PRICE_MIN = 1.0
+const PRICE_MIN = 2.0
 const PRICE_MAX = 3.0
-const COST_MAX = 1.0
-const COST_MIN = 0.5
+const COST_MAX = 1.5
+const COST_MIN = 1.0
 const LATE_RATIO = 3.0
 const SALVAGE_MAX = 0.9
 const DEMAND_MAX = NUM_PROD / 2.0
 const NUM_TRAIN = 10 
-const NUM_TEST = 1000
+const NUM_TEST = 10000
 const MOM_SOLVER = Mosek.Optimizer
 const DEG_WASS = 2
-const WASS_INFO = [WassInfo(i*5.0e-2,DEG_WASS) for i in 0:20]
+const NUM_DIGIT = 3
+const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIGIT),DEG_WASS) for i in 0:9];
+                   [WassInfo(round(i*1.0e-1,digits=NUM_DIGIT),DEG_WASS) for i in 0:10]]
 
 const OUTPUT_FILE = "../result_assembly_$(NUM_PART)_$(NUM_PROD).csv"
 
@@ -62,36 +65,36 @@ function experiment_assembly(
         P = zeros(n,m)
         for j = 1:m
             for i =1:(j-1)
-                P[i,j] = 1/(j-1) * 0.2
+                P[i,j] = round(0.1/(j-1),digits=NUM_DIGIT)
             end
             for i = j:n
-                P[i,j] = 1/(n+1-j) * 0.8
+                P[i,j] = round(0.9/(n+1-j),digits=NUM_DIGIT)
             end
         end
     end
-    # check if the regular prices are supplied
+    # check if the product prices are supplied
     if length(r) != m
         r = zeros(m)
         for j = 1:m
-            r[j] = PRICE_MIN + (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1)
+            r[j] = round(PRICE_MIN + (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIGIT)
         end
     end
     # check if the ingredient prices are supplied
     if length(f_x) != n
         f_x = zeros(n)
         for i = 1:n
-            f_x[i] = COST_MAX - (COST_MAX-COST_MIN)*(i-1)/(n-1)
+            f_x[i] = round(COST_MIN + (COST_MAX-COST_MIN)*(i-1)/(n-1), digits=NUM_DIGIT)
         end
     end
     if length(g) != n
-        g = LATE_RATIO * f_x
+        g = round.(LATE_RATIO * f_x, digits=NUM_DIGIT)
     end
     if length(s) != n
-        s = SALVAGE_MAX * f_x
+        s = round.(SALVAGE_MAX * f_x, digits=NUM_DIGIT)
     end
     # take the samples of salvage prices and demands
-    sample_train = [rand(m+2*n) for _ in 1:N]
-    sample_test = [rand(m+2*n) for _ in 1:M]
+    sample_train = [round.(rand(m+2*n),digits=NUM_DIGIT) for _ in 1:N]
+    sample_test = [round.(rand(m+2*n),digits=NUM_DIGIT) for _ in 1:M]
     # define the two-stage linear recourse function, 
     # where ξᵢ represents qᵢ, i = 1,…,m, ξⱼ for tⱼ, j = m+1,…,m+n, ξⱼ for sⱼ, j = m+n+1,…,m+2n.
     @polyvar x[1:n] ξ[1:m+2*n] y[1:n+m]
@@ -109,9 +112,10 @@ function experiment_assembly(
     println("Start the experiment on the two-stage product assembly problem...")
     println("The number of ingredient is ", n)
     println("The number of products is ", m)
-    println("The regular prices are ", r)
-    println("The salvage prices are ", s)
-    println("The late purchase prices are ", g)
+    println("The product prices are ", r)
+    println("The ingredient prices are ", f_x)
+    println("The ingredient maximum salvage prices are ", s)
+    println("The late ingredient prices are ", g)
     println("The number of training samples is ", N)
     println("The first-stage cost function is ", f_x'*x)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])

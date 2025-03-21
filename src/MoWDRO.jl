@@ -6,7 +6,9 @@ using LinearAlgebra, DynamicPolynomials, SumOfSquares, SemialgebraicSets, Multiv
 using JuMP, PolyJuMP
 using Format
 # set default solvers
-import HiGHS, CSDP
+import HiGHS, CSDP, ECOS
+# TODO: delete this
+import Gurobi
 const DEFAULT_LP = HiGHS.Optimizer
 const DEFAULT_SDP = CSDP.Optimizer
 
