@@ -31,8 +31,8 @@ const NUM_PART = 10
 const NUM_PROD = 10
 const PRICE_MIN = 2.0
 const PRICE_MAX = 3.0
-const COST_MAX = 1.5
-const COST_MIN = 1.0
+const COST_MAX = 1.2
+const COST_MIN = 0.8
 const LATE_RATIO = 3.0
 const SALVAGE_MAX = 0.9
 const DEMAND_MAX = NUM_PROD / 2.0
@@ -41,8 +41,9 @@ const NUM_TEST = 10000
 const MOM_SOLVER = Mosek.Optimizer
 const DEG_WASS = 2
 const NUM_DIGIT = 3
-const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIGIT),DEG_WASS) for i in 0:9];
-                   [WassInfo(round(i*1.0e-1,digits=NUM_DIGIT),DEG_WASS) for i in 0:10]]
+const WASS_INFO = [[WassInfo(round(i*1.0e-3,digits=NUM_DIGIT),DEG_WASS) for i in 0:9];
+                   [WassInfo(round(i*1.0e-2,digits=NUM_DIGIT),DEG_WASS) for i in 1:9];
+                   [WassInfo(round(i*1.0e-1,digits=NUM_DIGIT),DEG_WASS) for i in 1:10]]
 
 const OUTPUT_FILE = "../result_assembly_$(NUM_PART)_$(NUM_PROD).csv"
 
