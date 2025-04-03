@@ -1,75 +1,80 @@
-# numerical example for a two-stage multiproduct assembly problem 
+# numerical example for a two-stage mixing problem 
 # (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,1]ⁿ, where fₓ ∈ [0,1]ⁿ, and 
 # F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
 #           s.t. wⱼ - uⱼ = tⱼ(ξ)⋅xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j,
 #                0 ≤ zᵢ ≤ qᵢ(ξ),                 ∀ i,
 #                wⱼ, uⱼ ≥ 0,                     ∀ j.
-# Here, rᵢ > 0 is the regular price, 
-# sᵢ is the salvage price,
+# Here, rᵢ > 0 is the product price, 
 # gⱼ is the late price for ingredient purchasing,
 # pᵢⱼ is the percentage of ingredient j in product i,
-# tⱼ(ξ) ∼ Uniform(0,1) is the random spoilage 
-# percentage for ingredient j, 
+# sᵢ(ξ) ∼ Uniform(0,1) is the random salvage price 
+# factor for ingredient i,
+# tᵢ(ξ) ∼ Uniform(0,1) is the random spoilage 
+# percentage for ingredient i, 
 # qᵢ(ξ) ∼ Uniform(0,1) is the random demand factor, so 
 # that the total demand is qᵢ⋅D for some D > 0.
+# We assume an ingredient is either perishable, or has a 
+# discounted salvage price.
 # By linear duality, we can write F alternatively as
-# F(x,ξ) = max  -(t⋅xᵀ, q(ξ)ᵀ)⋅y 
-#               = (1,x)ᵀ⋅[0  0 -q(ξ)ᵀ; 0 -diag(t) 0]⋅(1,y)
+# F(x,ξ) = max  -(t(ξ)⋅xᵀ, q(ξ)ᵀ)⋅y 
+#               = (1,x)ᵀ⋅[0 0 -q(ξ)ᵀ; 0 -diag(t(ξ)) 0]⋅(1,y)
 #          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
 
 
-using JuMP, HiGHS 
-using Mosek, MosekTools
+using JuMP, HiGHS, Mosek, MosekTools # use Mosek for numerical stability
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
 include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_PART = 10 
-const NUM_PROD = 10
-const PRICE_MIN = 2.0
+const NUM_PART = 20 
+const NUM_PROD = 20
+const PRICE_MIN = 1.5
 const PRICE_MAX = 3.0
 const COST_MAX = 1.2
 const COST_MIN = 0.8
 const LATE_RATIO = 3.0
 const SALVAGE_MAX = 0.9
-const DEMAND_MAX = NUM_PROD / 2.0
-const NUM_TRAIN = 10 
+const DEMAND_MAX = 1.0
+const NUM_TRAIN = 5 
 const NUM_TEST = 10000
 const MOM_SOLVER = Mosek.Optimizer
 const DEG_WASS = 2
-const NUM_DIGIT = 3
-const WASS_INFO = [[WassInfo(round(i*1.0e-3,digits=NUM_DIGIT),DEG_WASS) for i in 0:9];
-                   [WassInfo(round(i*1.0e-2,digits=NUM_DIGIT),DEG_WASS) for i in 1:9];
-                   [WassInfo(round(i*1.0e-1,digits=NUM_DIGIT),DEG_WASS) for i in 1:10]]
+const NUM_DIG = 3
+const WASS_INFO = [[WassInfo(round(i*2.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:5];
+                   [WassInfo(round(i*2.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:5]]
 
-const OUTPUT_FILE = "../result_assembly_$(NUM_PART)_$(NUM_PROD).csv"
+OUTPUT_FILE = "../result_mixing_$(NUM_PART)_$(NUM_PROD).csv"
+if length(ARGS) > 0
+    OUTPUT_FILE = ARGS[1]
+end
 
-# function that conducts experiments on the multiproduct assembly problem
-function experiment_assembly(
+# function that conducts experiments on the multiproduct mixing problem
+function experiment_mixing(
         n::Int,              # number of ingredients
         m::Int,              # number of products
         W::Vector{WassInfo}, # list of Wasserstein robustness settings to be used 
         N::Int = NUM_TRAIN,  # number of training samples
         M::Int = NUM_TEST;   # number of testing samples
-        P::Matrix{Float64} = zeros(0,0), # matrix of assembly coefficients 
+        P::Matrix{Float64} = zeros(0,0), # matrix of mixing coefficients 
         r::Vector{Float64} = zeros(0),   # vector of regular product prices
         f_x::Vector{Float64} = zeros(0), # vector of ingredient costs
         g::Vector{Float64} = zeros(0),   # vector of late ingredient costs
-        s::Vector{Float64} = zeros(0),   # vector of ingredient salvage prices
+        s::Vector{Float64} = zeros(0),   # vector of maximum salvage prices
+        t::Vector{Int} = zeros(Int,0),   # vector of minimum unspoiled percentages
         D::Float64 = DEMAND_MAX,         # bound on the demands
     )
-    # check if the assembly coefficients are supplied
+    # check if the mixing coefficients are supplied
     if size(P) != (n,m)
         P = zeros(n,m)
         for j = 1:m
             for i =1:(j-1)
-                P[i,j] = round(0.1/(j-1),digits=NUM_DIGIT)
+                P[i,j] = round(0.1/(j-1),digits=NUM_DIG)
             end
             for i = j:n
-                P[i,j] = round(0.9/(n+1-j),digits=NUM_DIGIT)
+                P[i,j] = round(0.9/(n+1-j),digits=NUM_DIG)
             end
         end
     end
@@ -77,40 +82,59 @@ function experiment_assembly(
     if length(r) != m
         r = zeros(m)
         for j = 1:m
-            r[j] = round(PRICE_MIN + (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIGIT)
+            r[j] = round(PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIG)
         end
     end
     # check if the ingredient prices are supplied
     if length(f_x) != n
         f_x = zeros(n)
         for i = 1:n
-            f_x[i] = round(COST_MIN + (COST_MAX-COST_MIN)*(i-1)/(n-1), digits=NUM_DIGIT)
+            f_x[i] = round(COST_MIN + (COST_MAX-COST_MIN)*(i-1)/(n-1), digits=NUM_DIG)
         end
     end
     if length(g) != n
-        g = round.(LATE_RATIO * f_x, digits=NUM_DIGIT)
+        g = round.(LATE_RATIO * f_x, digits=NUM_DIG)
     end
     if length(s) != n
-        s = round.(SALVAGE_MAX * f_x, digits=NUM_DIGIT)
+        s = round.(SALVAGE_MAX * f_x, digits=NUM_DIG)
+    end
+    if length(t) != n
+        t = zeros(Int,n)
+        for i = 1:n
+            if iseven(i)
+                t[i] = 1
+            end
+        end
     end
     # take the samples of salvage prices and demands
-    sample_train = [round.(rand(m+2*n),digits=NUM_DIGIT) for _ in 1:N]
-    sample_test = [round.(rand(m+2*n),digits=NUM_DIGIT) for _ in 1:M]
+    sample_train = [round.(rand(m+n),digits=NUM_DIG) for _ in 1:N]
+    sample_test = [round.(rand(m+n),digits=NUM_DIG) for _ in 1:M]
+    # declare the recourse variables
+    # where ξᵢ stands for qᵢ, i = 1,…,m, ξⱼ for tⱼ or sⱼ, j = m+1,…,m+n.
+    @polyvar x[1:n] ξ[1:m+n] y[1:n+m]
+    # distinguish the perishable vs nonperishable ingredients
+    C_t = ones(n) .+ 0.0*sum(ξ)
+    b_s = s .+ 0.0*sum(ξ)
+    for i = 1:n
+        if t[i] == 1 # nonperishable ingredient
+            b_s[i] = s[i]*ξ[m+i]
+        else         # perishable ingredient
+            C_t[i] = ξ[m+i]
+        end
+    end
     # define the two-stage linear recourse function, 
-    # where ξᵢ represents qᵢ, i = 1,…,m, ξⱼ for tⱼ, j = m+1,…,m+n, ξⱼ for sⱼ, j = m+n+1,…,m+2n.
-    @polyvar x[1:n] ξ[1:m+2*n] y[1:n+m]
-    C = [zeros(n+1)' -D*ξ[1:m]'; zeros(n) -Diagonal(ξ[m+1:m+n]) zeros(n,m)]
+    C = [zeros(n+1)' -D*ξ[1:m]'; zeros(n) -Diagonal(C_t) zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [s.*ξ[m+n+1:m+2*n]; -g; r; -r; zeros(m)]
+    b = [b_s; -g; r; -r; zeros(m)]
     Ξ = basicsemialgebraicset(FullSpace(), 
-                              [[ξ[i] for i in 1:m];
-                               [1-ξ[i] for i in 1:m];
-                               [ξ[i]*(1-ξ[i]) for i in 1:m]
+                              [[ξ[i] for i in 1:m+n];
+                               [1-ξ[i] for i in 1:m+n];
+                               [ξ[i]*(1-ξ[i]) for i in 1:m+n]
                               ])
     B = [g; r]
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
     # print the problem information
-    println("Start the experiment on the two-stage product assembly problem...")
+    println("Start the experiment on the two-stage product mixing problem...")
     println("The number of ingredient is ", n)
     println("The number of products is ", m)
     println("The product prices are ", r)
@@ -183,4 +207,4 @@ function experiment_assembly(
 end
 
 # run the experiment
-experiment_assembly(NUM_PART, NUM_PROD, WASS_INFO)
+experiment_mixing(NUM_PART, NUM_PROD, WASS_INFO)

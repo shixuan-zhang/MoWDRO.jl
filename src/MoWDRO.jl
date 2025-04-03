@@ -6,9 +6,7 @@ using LinearAlgebra, DynamicPolynomials, SumOfSquares, SemialgebraicSets, Multiv
 using JuMP, PolyJuMP
 using Format
 # set default solvers
-import HiGHS, CSDP, ECOS
-# TODO: delete this
-import Gurobi
+import HiGHS, CSDP
 const DEFAULT_LP = HiGHS.Optimizer
 const DEFAULT_SDP = CSDP.Optimizer
 
@@ -18,10 +16,9 @@ export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
 export solve_main_level, eval_nominal, eval_moment_Wass
 
 # define module-wide shared parameters
-const NUM_DIG = 8
+const NUM_DIG = 6
 const VAL_TOL = 1.0e-6
-const VAL_INF = 1.0e9
-const VAL_INIT_AUX = 1.0e2
+const VAL_INF = 1.0e8
 const NUM_MAX_ITER = 1000
 
 # define basic types
