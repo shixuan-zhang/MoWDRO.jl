@@ -3,10 +3,7 @@
 # s.t. (x,u) ∈ Feasible Set, w ≥ 0.
 
 # default parameters for the level bundle method 
-const VAL_GAP = 1.0e-2
-const VAL_LEVEL = 0.5
-const VAL_MIN_AUX = 1.0e-2
-const VAL_MAX_AUX = 1.0e3
+const DEFAULT_LEVEL = 1/(2+sqrt(2))
 
 function solve_main_level(
         main::MainProblem,
@@ -14,10 +11,11 @@ function solve_main_level(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo = WassInfo(.0,2);
         max_iter::Int = NUM_MAX_ITER,
-        opt_gap::Float64 = VAL_GAP,
-        max_aux::Float64 = VAL_MAX_AUX,
-        min_aux::Float64 = VAL_MIN_AUX,
-        level::Float64 = VAL_LEVEL,
+        opt_gap::Float64 = VAL_TOL,
+        max_aux::Float64 = VAL_INF,
+        min_aux::Float64 = 0.0,
+        min_phi::Float64 = -VAL_INF,
+        level::Float64 = DEFAULT_LEVEL,
         mom_solver = DEFAULT_SDP,
         print::Int = 1
     )::MainSolution where T <: SampleSubproblem
@@ -36,7 +34,7 @@ function solve_main_level(
         set_lower_bound(main.w, min_aux)
     end
     # add the artificial bound on the recourse auxiliary variable ϕ
-    set_lower_bound(main.ϕ, -VAL_INF)
+    set_lower_bound(main.ϕ, min_phi)
     # get the initial solution and lower bound
     @objective(main.model, Min, obj)
     optimize!(main.model)

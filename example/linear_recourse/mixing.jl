@@ -31,20 +31,25 @@ using .MoWDRO
 # experiment parameters
 const NUM_PART = 20 
 const NUM_PROD = 20
-const PRICE_MIN = 1.5
-const PRICE_MAX = 3.0
+const PRICE_MIN = 1.0
+const PRICE_MAX = 2.5
 const COST_MAX = 1.2
 const COST_MIN = 0.8
-const LATE_RATIO = 3.0
-const SALVAGE_MAX = 0.9
+const LATE_RATIO = 2.0
+const SALVAGE_MAX = 0.95
 const DEMAND_MAX = 1.0
+
+const MIN_AUX = 1.0e-1
+const MAX_AUX = 1.0e3
+const MIN_PHI = -1.0e2
+const OPT_GAP = 1.0e-2
 const NUM_TRAIN = 5 
 const NUM_TEST = 10000
 const MOM_SOLVER = Mosek.Optimizer
 const DEG_WASS = 2
 const NUM_DIG = 3
-const WASS_INFO = [[WassInfo(round(i*2.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:5];
-                   [WassInfo(round(i*2.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:5]]
+const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:9];
+                   [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
 
 OUTPUT_FILE = "../result_mixing_$(NUM_PART)_$(NUM_PROD).csv"
 if length(ARGS) > 0
@@ -167,7 +172,16 @@ function experiment_mixing(
         main = MainProblem(model, x, VariableRef[], w, ϕ, f_x, Float64[])
         # solve the problem
         time_start = time()
-        sol = solve_main_level(main, recourse, sample_train, wassinfo, print=1, mom_solver=MOM_SOLVER)
+        sol = solve_main_level(main, 
+                               recourse, 
+                               sample_train, 
+                               wassinfo, 
+                               print=1, 
+                               opt_gap=OPT_GAP,
+                               max_aux=MAX_AUX,
+                               min_aux=MIN_AUX,
+                               min_phi=MIN_PHI,
+                               mom_solver=MOM_SOLVER)
         time_finish = time()
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
