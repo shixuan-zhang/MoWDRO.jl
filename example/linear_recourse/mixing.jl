@@ -22,9 +22,12 @@
 #          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
 
 
-using JuMP, HiGHS, Mosek, MosekTools # use Mosek for numerical stability
+using JuMP
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
+# use commercial solvers for efficiency and numerical stability
+using Gurobi, Mosek, MosekTools 
+const GRB_ENV = Gurobi.Env()
 include("../../src/MoWDRO.jl")
 using .MoWDRO
 
@@ -32,11 +35,11 @@ using .MoWDRO
 const NUM_PART = 20 
 const NUM_PROD = 20
 const PRICE_MIN = 1.0
-const PRICE_MAX = 2.5
-const COST_MAX = 1.2
-const COST_MIN = 0.8
-const LATE_RATIO = 2.0
-const SALVAGE_MAX = 0.95
+const PRICE_MAX = 4.0
+const COST_MAX = 1.0
+const COST_MIN = 0.5
+const LATE_RATIO = 3.0
+const SALVAGE_MAX = 1.0
 const DEMAND_MAX = 1.0
 
 const MIN_AUX = 1.0e-1
@@ -45,11 +48,9 @@ const MIN_PHI = -1.0e2
 const OPT_GAP = 1.0e-2
 const NUM_TRAIN = 5 
 const NUM_TEST = 10000
-const MOM_SOLVER = Mosek.Optimizer
 const DEG_WASS = 2
 const NUM_DIG = 3
-const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:9];
-                   [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
+const WASS_INFO = [WassInfo(round(i*2.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:25]
 
 OUTPUT_FILE = "../result_mixing_$(NUM_PART)_$(NUM_PROD).csv"
 if length(ARGS) > 0
@@ -163,9 +164,9 @@ function experiment_mixing(
     TEST_Q10   = Float64[]
     # loop over all Wasserstein robustness settings
     for wassinfo in W
-        # define the main linear optimization problem 
-        model = Model(HiGHS.Optimizer)
-        set_silent(model)
+        # define the main linear/quadratic optimization problem 
+        model = Model(() -> Gurobi.Optimizer(GRB_ENV))
+        set_attribute(model, "OutputFlag", 0)
         x = @variable(model, 0 <= x[1:n] <= 1, base_name="x")
         w = @variable(model, w >= 0, base_name="w")
         ϕ = @variable(model, ϕ, base_name="ϕ")
@@ -181,7 +182,7 @@ function experiment_mixing(
                                max_aux=MAX_AUX,
                                min_aux=MIN_AUX,
                                min_phi=MIN_PHI,
-                               mom_solver=MOM_SOLVER)
+                               mom_solver=Mosek.Optimizer)
         time_finish = time()
         println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
         println("x = ", sol.x)
