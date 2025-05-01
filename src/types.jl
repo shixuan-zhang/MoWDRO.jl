@@ -40,10 +40,11 @@ abstract type SampleSubproblem end
 
 # structure for (second-stage) recourse linear optimization subproblem
 # F(x,ξ) := max  (1,x₁,…,xₙ)ᵀ⋅C(ξ)⋅(1,y₁,…,yₘ)
-#           s.t. A(ξ)y-b(ξ) ≥ 0,
+#           s.t. A(ξ)y-b(ξ) ≥ 0, |y| ≤ B,
 # ξ ∈ Ξ.
 # Here, ξ is the uncertainty vector, y is the recourse decision,
-# A, b, and C are vectors and matrices with polynomial entries in ξ.
+# A, b, and C are vectors and matrices with polynomial entries in ξ,
+# B is the bound vector on the absolute values of y (negative means ∞).
 struct SampleLinearRecourse <: SampleSubproblem
     # PolyJuMP/DynamicPolynomials (Symbolic) Variables
     x::Vector
@@ -55,7 +56,7 @@ struct SampleLinearRecourse <: SampleSubproblem
     b::Vector
     # Semi-algebraic Uncertainty Set
     Ξ::BasicSemialgebraicSet
-    # Recourse Variable Bounds
+    # Recourse Variable Absolute Bounds
     B::Vector
 end
 

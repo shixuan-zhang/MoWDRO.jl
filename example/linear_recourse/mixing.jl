@@ -1,10 +1,10 @@
 # numerical example for a two-stage mixing problem 
 # (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
-# min fₓᵀx + E[F(x,ξ)], x ∈ [0,1]ⁿ, where fₓ ∈ [0,1]ⁿ, and 
+# min fₓᵀx + E[F(x,ξ)], x ∈ [0,D]ⁿ, where fₓ ∈ [0,1]ⁿ, and 
 # F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
-#           s.t. wⱼ - uⱼ = tⱼ(ξ)⋅xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j,
-#                0 ≤ zᵢ ≤ qᵢ(ξ),                 ∀ i,
-#                wⱼ, uⱼ ≥ 0,                     ∀ j.
+#           s.t. wⱼ - uⱼ = tⱼ(ξ)⋅xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j = 1,…,n,
+#                0 ≤ zᵢ ≤ qᵢ(ξ),                 ∀ i = 1,…,m,
+#                wⱼ, uⱼ ≥ 0,                     ∀ j = 1,…,n.
 # Here, rᵢ > 0 is the product price, 
 # gⱼ is the late price for ingredient purchasing,
 # pᵢⱼ is the percentage of ingredient j in product i,
@@ -12,8 +12,8 @@
 # factor for ingredient i,
 # tᵢ(ξ) ∼ Uniform(0,1) is the random spoilage 
 # percentage for ingredient i, 
-# qᵢ(ξ) ∼ Uniform(0,1) is the random demand factor, so 
-# that the total demand is qᵢ⋅D for some D > 0.
+# qᵢ(ξ) ∼ LogNormal(0,σ) is the random demand factor, so 
+# that the total demand is qᵢ⋅dᵢ for some dᵢ > 0.
 # We assume an ingredient is either perishable, or has a 
 # discounted salvage price.
 # By linear duality, we can write F alternatively as
@@ -38,19 +38,22 @@ const PRICE_MIN = 1.0
 const PRICE_MAX = 4.0
 const COST_MAX = 1.0
 const COST_MIN = 0.5
-const LATE_RATIO = 3.0
+const LATE_RATIO = 2.0
 const SALVAGE_MAX = 1.0
-const DEMAND_MAX = 1.0
+const DEMAND_MAX = 2.0
+const DEMAND_MIN = 1.0
+const DEMAND_VAR = 0.1
+const STORAGE_MAX = 5.0
 
 const MIN_AUX = 1.0e-1
 const MAX_AUX = 1.0e3
 const MIN_PHI = -1.0e2
 const OPT_GAP = 1.0e-2
-const NUM_TRAIN = 5 
+const NUM_TRAIN = 10 
 const NUM_TEST = 10000
 const DEG_WASS = 2
 const NUM_DIG = 3
-const WASS_INFO = [WassInfo(round(i*2.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:25]
+const WASS_INFO = [WassInfo(round(i*5.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:10]
 
 OUTPUT_FILE = "../result_mixing_$(NUM_PART)_$(NUM_PROD).csv"
 if length(ARGS) > 0
@@ -64,13 +67,15 @@ function experiment_mixing(
         W::Vector{WassInfo}, # list of Wasserstein robustness settings to be used 
         N::Int = NUM_TRAIN,  # number of training samples
         M::Int = NUM_TEST;   # number of testing samples
+        D::Float64 = STORAGE_MAX,        # maximum ingredient storage capacity
+        f_x::Vector{Float64} = zeros(0), # vector of ingredient costs
         P::Matrix{Float64} = zeros(0,0), # matrix of mixing coefficients 
         r::Vector{Float64} = zeros(0),   # vector of regular product prices
-        f_x::Vector{Float64} = zeros(0), # vector of ingredient costs
+        d::Vector{Float64} = zeros(0),   # vector of standard demands
+        σ::Vector{Float64} = zeros(0),   # vector of demand logarithmic variance
         g::Vector{Float64} = zeros(0),   # vector of late ingredient costs
         s::Vector{Float64} = zeros(0),   # vector of maximum salvage prices
         t::Vector{Int} = zeros(Int,0),   # vector of minimum unspoiled percentages
-        D::Float64 = DEMAND_MAX,         # bound on the demands
     )
     # check if the mixing coefficients are supplied
     if size(P) != (n,m)
@@ -90,6 +95,17 @@ function experiment_mixing(
         for j = 1:m
             r[j] = round(PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIG)
         end
+    end
+    # check if the standard demands are supplied
+    if length(d) != m
+        d = zeros(m)
+        for j = 1:m
+            d[j] = round(DEMAND_MAX - (DEMAND_MAX-DEMAND_MIN)*(j-1)/(m-1), digits=NUM_DIG)
+        end
+    end
+    # check if the demand logarithmic variances are supplied
+    if length(σ) != m
+        σ = DEMAND_VAR * ones(m)
     end
     # check if the ingredient prices are supplied
     if length(f_x) != n
@@ -113,8 +129,8 @@ function experiment_mixing(
         end
     end
     # take the samples of salvage prices and demands
-    sample_train = [round.(rand(m+n),digits=NUM_DIG) for _ in 1:N]
-    sample_test = [round.(rand(m+n),digits=NUM_DIG) for _ in 1:M]
+    sample_train = [round.([exp.(randn(m).*σ);rand(n)],digits=NUM_DIG) for _ in 1:N]
+    sample_test = [round.([exp.(randn(m).*σ);rand(n)],digits=NUM_DIG) for _ in 1:M]
     # declare the recourse variables
     # where ξᵢ stands for qᵢ, i = 1,…,m, ξⱼ for tⱼ or sⱼ, j = m+1,…,m+n.
     @polyvar x[1:n] ξ[1:m+n] y[1:n+m]
@@ -129,13 +145,13 @@ function experiment_mixing(
         end
     end
     # define the two-stage linear recourse function, 
-    C = [zeros(n+1)' -D*ξ[1:m]'; zeros(n) -Diagonal(C_t) zeros(n,m)]
+    C = [zeros(n+1)' -(d.*ξ[1:m])'; zeros(n) -Diagonal(C_t) zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
     b = [b_s; -g; r; -r; zeros(m)]
     Ξ = basicsemialgebraicset(FullSpace(), 
                               [[ξ[i] for i in 1:m+n];
-                               [1-ξ[i] for i in 1:m+n];
-                               [ξ[i]*(1-ξ[i]) for i in 1:m+n]
+                               [1-ξ[i] for i in m+1:m+n];
+                               [ξ[i]*(1-ξ[i]) for i in m+1:m+n]
                               ])
     B = [g; r]
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
@@ -148,6 +164,7 @@ function experiment_mixing(
     println("The ingredient maximum salvage prices are ", s)
     println("The late ingredient prices are ", g)
     println("The number of training samples is ", N)
+    println("The number of testing samples is ", M)
     println("The first-stage cost function is ", f_x'*x)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
     println("The second-stage constraints are ", A*y - b)
@@ -167,7 +184,7 @@ function experiment_mixing(
         # define the main linear/quadratic optimization problem 
         model = Model(() -> Gurobi.Optimizer(GRB_ENV))
         set_attribute(model, "OutputFlag", 0)
-        x = @variable(model, 0 <= x[1:n] <= 1, base_name="x")
+        x = @variable(model, 0 <= x[1:n] <= D, base_name="x")
         w = @variable(model, w >= 0, base_name="w")
         ϕ = @variable(model, ϕ, base_name="ϕ")
         main = MainProblem(model, x, VariableRef[], w, ϕ, f_x, Float64[])
