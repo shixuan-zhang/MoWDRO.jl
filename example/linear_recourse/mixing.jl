@@ -53,7 +53,10 @@ const NUM_TRAIN = 10
 const NUM_TEST = 10000
 const DEG_WASS = 2
 const NUM_DIG = 3
-const WASS_INFO = [WassInfo(round(i*5.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:10]
+const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:9];
+                  [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:9];
+                  [WassInfo(round(i*1.0e0,digits=NUM_DIG),DEG_WASS) for i in 1:9];
+                  [WassInfo(round(i*1.0e1,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
 
 OUTPUT_FILE = "../result_mixing_$(NUM_PART)_$(NUM_PROD).csv"
 if length(ARGS) > 0
@@ -219,7 +222,7 @@ function experiment_mixing(
         append!(TRAIN_OBJ, sol.f+sol.ϕ)
         append!(TEST_MEAN, mean(vals)+sol.f)
         append!(TEST_STD, std(vals))
-        vec_quant = quantile(vals, [0.1,0.5,0.9])
+        vec_quant = quantile(vals.+sol.f, [0.1,0.5,0.9])
         append!(TEST_Q10, vec_quant[1])
         append!(TEST_MED, vec_quant[2])
         append!(TEST_Q90, vec_quant[3])

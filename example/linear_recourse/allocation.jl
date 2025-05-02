@@ -31,22 +31,25 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_FACILITY = 10
+const NUM_FACILITY = 5
 const NUM_SITE = 20
 const COST_HOLDING = 1.0
 const COST_SUBCONTRACT = 10.0
+const MEAN_DEMAND = 3.0
+const VAR_DEMAND = 0.2
 const MAX_CAPACITY = 100.0
 
 const MIN_AUX = 1.0e-1
-const MAX_AUX = 1.0e3
+const MAX_AUX = 1.0e4
 const MIN_PHI = 0.0
 const OPT_GAP = 1.0e-2
 const NUM_TRAIN = 10 
 const NUM_TEST = 10000
 const DEG_WASS = 2
 const NUM_DIG = 3
-const WASS_INFO = [[WassInfo(round(i*5.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:4];
-                  [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 3:10]]
+const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:9];
+                  [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:9];
+                  [WassInfo(round(i*1.0e0,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
 
 OUTPUT_FILE = "../result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv"
 if length(ARGS) > 0
@@ -91,11 +94,13 @@ function experiment_allocation(
         D::Float64 = MAX_CAPACITY,     # maximum facility capacity
         h::Float64 = COST_HOLDING,     # cost for holding inventory
         s::Float64 = COST_SUBCONTRACT, # cost for subcontracted demand
+        μ::Float64 = MEAN_DEMAND,      # mean factor for the demand
+        σ::Float64 = VAR_DEMAND,       # variance factor for the demand
         d::Vector{Float64} = zeros(0)  # distance vector
     )
     # take the samples of random demands
-    sample_train = [round.(exp.(randn(m).+1),digits=NUM_DIG) for _ in 1:N]
-    sample_test = [round.(exp.(randn(m).+1),digits=NUM_DIG) for _ in 1:M]
+    sample_train = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:N]
+    sample_test = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:M]
     # construct the pairwise indicator matrix
     P = zeros(m*n, m+n)
     for i = 1:n
@@ -181,7 +186,7 @@ function experiment_allocation(
         append!(TRAIN_OBJ, sol.f+sol.ϕ)
         append!(TEST_MEAN, mean(vals)+sol.f)
         append!(TEST_STD, std(vals))
-        vec_quant = quantile(vals, [0.1,0.5,0.9])
+        vec_quant = quantile(vals.+sol.f, [0.1,0.5,0.9])
         append!(TEST_Q10, vec_quant[1])
         append!(TEST_MED, vec_quant[2])
         append!(TEST_Q90, vec_quant[3])
