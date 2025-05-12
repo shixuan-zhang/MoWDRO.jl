@@ -31,6 +31,7 @@ output_train = r"""\documentclass{standalone}
     height=8cm,
     xlabel={Wasserstein radius $r$},
     ylabel={Mean Obj.\ Value},
+    enlargelimits=0.05,
     legend pos=north west,
     ymajorgrids=true,
     grid style=dashed,""" + "\n"

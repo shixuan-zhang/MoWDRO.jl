@@ -1,4 +1,4 @@
-# numerical example for a two-stage mixing problem 
+# numerical example for a two-stage production problem 
 # (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,D]ⁿ, where fₓ ∈ [0,1]ⁿ, and 
 # F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
@@ -34,11 +34,11 @@ using .MoWDRO
 # experiment parameters
 const NUM_PART = 20 
 const NUM_PROD = 20
-const PRICE_MIN = 1.0
-const PRICE_MAX = 4.0
-const COST_MAX = 1.0
-const COST_MIN = 0.5
-const LATE_RATIO = 2.0
+const PRICE_MIN = 2.0
+const PRICE_MAX = 5.0
+const COST_MAX = 2.0
+const COST_MIN = 1.0
+const LATE_RATIO = 3.0
 const SALVAGE_MAX = 1.0
 const DEMAND_MAX = 2.0
 const DEMAND_MIN = 1.0
@@ -58,13 +58,13 @@ const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0
                   [WassInfo(round(i*1.0e0,digits=NUM_DIG),DEG_WASS) for i in 1:9];
                   [WassInfo(round(i*1.0e1,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
 
-OUTPUT_FILE = "../result_mixing_$(NUM_PART)_$(NUM_PROD).csv"
+OUTPUT_FILE = "../result_production_$(NUM_PART)_$(NUM_PROD).csv"
 if length(ARGS) > 0
     OUTPUT_FILE = ARGS[1]
 end
 
-# function that conducts experiments on the multiproduct mixing problem
-function experiment_mixing(
+# function that conducts experiments on the multiproduct production problem
+function experiment_production(
         n::Int,              # number of ingredients
         m::Int,              # number of products
         W::Vector{WassInfo}, # list of Wasserstein robustness settings to be used 
@@ -72,7 +72,7 @@ function experiment_mixing(
         M::Int = NUM_TEST;   # number of testing samples
         D::Float64 = STORAGE_MAX,        # maximum ingredient storage capacity
         f_x::Vector{Float64} = zeros(0), # vector of ingredient costs
-        P::Matrix{Float64} = zeros(0,0), # matrix of mixing coefficients 
+        P::Matrix{Float64} = zeros(0,0), # matrix of production coefficients 
         r::Vector{Float64} = zeros(0),   # vector of regular product prices
         d::Vector{Float64} = zeros(0),   # vector of standard demands
         σ::Vector{Float64} = zeros(0),   # vector of demand logarithmic variance
@@ -80,7 +80,7 @@ function experiment_mixing(
         s::Vector{Float64} = zeros(0),   # vector of maximum salvage prices
         t::Vector{Int} = zeros(Int,0),   # vector of minimum unspoiled percentages
     )
-    # check if the mixing coefficients are supplied
+    # check if the production coefficients are supplied
     if size(P) != (n,m)
         P = zeros(n,m)
         for j = 1:m
@@ -159,7 +159,7 @@ function experiment_mixing(
     B = [g; r]
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
     # print the problem information
-    println("Start the experiment on the two-stage product mixing problem...")
+    println("Start the experiment on the two-stage production problem...")
     println("The number of ingredient is ", n)
     println("The number of products is ", m)
     println("The product prices are ", r)
@@ -242,4 +242,4 @@ function experiment_mixing(
 end
 
 # run the experiment
-experiment_mixing(NUM_PART, NUM_PROD, WASS_INFO)
+experiment_production(NUM_PART, NUM_PROD, WASS_INFO)
