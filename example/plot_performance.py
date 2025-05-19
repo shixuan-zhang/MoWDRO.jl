@@ -32,7 +32,7 @@ output_train = r"""\documentclass{standalone}
     xlabel={Wasserstein radius $r$},
     ylabel={Mean Obj.\ Value},
     enlargelimits=0.05,
-    legend pos=north west,
+    legend pos=south east,
     ymajorgrids=true,
     grid style=dashed,""" + "\n"
 if min_rad_increment < 1:
@@ -73,55 +73,53 @@ output_test = r"""\documentclass{standalone}
     height=8cm,
     xlabel={Wasserstein radius $r$ (log-scale)},
     ylabel={Obj.\ Value},
-    legend pos=north west,
-    ymajorgrids=true,
-    grid style=loosely dotted,
+    legend pos=south east,
 ]
-    \addplot[color=blue,thick]
+    \addplot[color=blue,very thick]
     coordinates {""" + "\n"
 for i in range(len(data['WASS_RAD'])):
     output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
     output_test += str(round(data['TEST_MEAN'][i],2)) + ")\n"
 output_test += " "*4 + "};\n"
 output_test += r"""    \addlegendentry{DRO mean};
-    \addplot[name path=DRO10,color=blue!20,dashed]
+    \addplot[name path=DRO10,color=blue!20,loosely dashed]
     coordinates {""" + "\n"
 for i in range(len(data['WASS_RAD'])):
     output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
     output_test += str(round(data['TEST_Q90'][i],2)) + ")\n"
 output_test += " "*4 + "};\n"
 output_test += r"""    \addlegendentry{DRO 10-90\%};
-    \addplot[name path=DRO90,color=blue!20,dashed,forget plot]
+    \addplot[name path=DRO90,color=blue!20,loosely dashed,forget plot]
     coordinates {""" + "\n"
 for i in range(len(data['WASS_RAD'])):
     output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
     output_test += str(round(data['TEST_Q10'][i],2)) + ")\n"
 output_test += " "*4 + "};\n"
-output_test += r"""   \addplot[color=blue!20,dashed,forget plot]
+output_test += r"""   \addplot[color=blue!20,loosely dashed,forget plot]
     coordinates {""" + "\n"
 for i in range(len(data['WASS_RAD'])):
     output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
     output_test += str(round(data['TEST_MED'][i],2)) + ")\n"
 output_test += " "*4 + "};\n"
 output_test += r"""    \addplot[blue!10,forget plot] fill between [of=DRO10 and DRO90];
-    \addplot[color=red,thick]
+    \addplot[color=red,very thick,densely dotted]
     coordinates {
         (""" + str(min_rad) + "," + str(round(data['TEST_MEAN'][0],2)) + ")\n"
 output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_MEAN'][0],2)) + ")\n"
 output_test += r"""    };
     \addlegendentry{ESO mean};
-    \addplot[name path=ESO10,color=red!20,dashed]
+    \addplot[name path=ESO10,color=red!20,loosely dashdotted]
     coordinates {
         (""" + str(min_rad) + "," + str(round(data['TEST_Q90'][0],2)) + ")\n"
 output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_Q90'][0],2)) + ")\n"
 output_test += r"""    };
     \addlegendentry{ESO 10-90\%};
-    \addplot[name path=ESO90,color=red!20,dashed,forget plot]
+    \addplot[name path=ESO90,color=red!20,loosely dashdotted,forget plot]
     coordinates {
         (""" + str(min_rad) + "," + str(round(data['TEST_Q10'][0],2)) + ")\n"
 output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_Q10'][0],2)) + ")\n"
 output_test += r"""    };
-    \addplot[color=red!20,dashed,forget plot]
+    \addplot[color=red!20,loosely dashdotted,forget plot]
     coordinates {
         (""" + str(min_rad) + "," + str(round(data['TEST_MED'][0],2)) + ")\n"
 output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_MED'][0],2)) + ")\n"

@@ -55,8 +55,7 @@ const DEG_WASS = 2
 const NUM_DIG = 3
 const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:9];
                   [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:9];
-                  [WassInfo(round(i*1.0e0,digits=NUM_DIG),DEG_WASS) for i in 1:9];
-                  [WassInfo(round(i*1.0e1,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
+                  [WassInfo(round(i*1.0e0,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
 
 OUTPUT_FILE = "../result_production_$(NUM_PART)_$(NUM_PROD).csv"
 if length(ARGS) > 0
