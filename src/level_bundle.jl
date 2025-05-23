@@ -87,6 +87,12 @@ function solve_main_level(
             error("The level method bounding step has failed with status: ", termination_status(main.model))
         end
         min_obj = objective_value(main.model)
+        if max_obj - min_obj <= opt_gap
+            if print > 0
+                printfmtln(" The level method has converged with the updated lower bound {}.", min_obj)
+            end
+            break
+        end
         # calculate the level
         val_lev = round(level*max_obj + (1-level)*min_obj,digits=NUM_DIG)
         # build the projection model
