@@ -1,6 +1,7 @@
 # MoWDRO.jl
 
 Implementation of **Mo**ment relaxations for data-driven **W**asserstein **D**istributionally **R**obust **O**ptimization problems.
+For details on the formulations and asymptotic consistency, please see our [arXiv preprint](https://arxiv.org/abs/2505.19278).
 
 
 ## Running experiments
