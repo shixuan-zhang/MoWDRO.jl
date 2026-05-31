@@ -2,7 +2,6 @@
 # for both the polynomial-loss and linear-recourse dispatches.
 
 using DynamicPolynomials, SemialgebraicSets
-using SCIP
 
 # ---------------------------------------------------------------------------
 # Closed-form check for the `SamplePolynomialLoss` dispatch.
@@ -20,8 +19,7 @@ function test_noncvx_polynomial_loss()
     augstate = [1.0, 2.0]
     samples  = [[0.5]]
     wassinfo = WassInfo(1.0, 2)
-    cut = eval_noncvx_Wass(loss, augstate, samples, wassinfo;
-                           noncvx_solver = SCIP.Optimizer)
+    cut = eval_noncvx_Wass(loss, augstate, samples, wassinfo)
     @test isapprox(cut, [0.0, 0.75, 0.9375], atol = 1e-4)
 end
 
@@ -45,7 +43,6 @@ function test_noncvx_linear_recourse()
     augstate = [1.0, 2.0]
     samples  = [[0.5]]
     wassinfo = WassInfo(1.0, 2)
-    cut = eval_noncvx_Wass(recourse, augstate, samples, wassinfo;
-                           noncvx_solver = SCIP.Optimizer)
+    cut = eval_noncvx_Wass(recourse, augstate, samples, wassinfo)
     @test isapprox(cut, [0.0, 0.75, 0.9375], atol = 1e-4)
 end

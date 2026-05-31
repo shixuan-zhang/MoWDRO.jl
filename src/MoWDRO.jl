@@ -6,9 +6,10 @@ using LinearAlgebra, DynamicPolynomials, SumOfSquares, SemialgebraicSets, Multiv
 using JuMP, PolyJuMP
 using Format
 # set default solvers
-import HiGHS, CSDP
+import HiGHS, CSDP, SCIP
 const DEFAULT_LP = HiGHS.Optimizer
 const DEFAULT_SDP = CSDP.Optimizer
+const DEFAULT_NCVX = SCIP.Optimizer
 
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo

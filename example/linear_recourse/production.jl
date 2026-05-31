@@ -182,10 +182,10 @@ function experiment_production(
         g::Vector{Float64} = zeros(0),   # vector of late ingredient costs
         s::Vector{Float64} = zeros(0),   # vector of maximum salvage prices
         t::Vector{Int} = zeros(Int,0),   # vector of minimum unspoiled percentages
-        baseline::String = "none",       # baselines to run alongside the moment relaxation:
+        baseline::String = "none",       # string for baseline methods for comparison:
                                          #   "none"   — none
-                                         #   "copos"  — Hanasusanto-Kuhn (2018) copositive
-                                         #   "noncvx" — nonconvex global (`eval_noncvx_Wass`)
+                                         #   "copos"  — Hanasusanto-Kuhn (2018) copositive formulation
+                                         #   "noncvx" — nonconvex global optimization formulation
                                          #   "all"    — both baselines
     )
     baseline in ("none", "copos", "noncvx", "all") || error(

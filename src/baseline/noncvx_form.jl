@@ -85,11 +85,7 @@ function eval_noncvx_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         print::Int = 0,
-        noncvx_solver = nothing
-    )
-    isnothing(noncvx_solver) && error(
-        "eval_noncvx_Wass requires a `noncvx_solver` kwarg, a callable returning " *
-        "a fresh nonconvex QCQP solver instance (e.g., `Gurobi.Optimizer`)."
+        noncvx_solver = DEFAULT_NCVX
     )
     N = length(samples)
     cuts = Vector{Float64}[]
@@ -173,12 +169,8 @@ function eval_noncvx_Wass(
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo;
         print::Int = 0,
-        noncvx_solver = nothing,
+        noncvx_solver = DEFAULT_NCVX,
         val_add_bound::Float64 = -1.0
-    )
-    isnothing(noncvx_solver) && error(
-        "eval_noncvx_Wass requires a `noncvx_solver` kwarg, a callable returning " *
-        "a fresh nonconvex QCQP solver instance (e.g., `Gurobi.Optimizer`)."
     )
     N = length(samples)
     cuts = Vector{Float64}[]

@@ -2,7 +2,8 @@
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,1]ⁿ, ∑ᵢxᵢ = 1, where fₓ ∈ [-1,1]ⁿ, 
 # and F(x,ξ) := C₁(ξᵀx) + C₂(ξᵀx)² + ⋯ + Cₖ(ξᵀx)ᵏ, ξ = Proj(D⋅η,[0,1]ⁿ), 
 # η ∼ Uniform(0,1)ᵐ, D ∈ Mat(n,m) with normalized columns,
-# and C₂,…,Cₖ are nonnegative (C₁ may be negative) so F is convex in x for any ξ.
+# and C₂,…,Cₖ are chosen such that Φ(t) := C₁t + C₂t² + ⋯ + Cₖtᵏ is 
+# a convex univariate polynomial.
 
 
 using JuMP, HiGHS
@@ -49,11 +50,28 @@ function experiment_portfolio(
         D::Matrix{Float64} = zeros(0,0), # dependence matrix in the factor model
         f_x::Vector{Float64} = zeros(0)
     )
-    # check if the loss function coefficients are supplied
+    # Sample Φ''(t) = p₁(t)² + p₂(t)² with p₁, p₂ random polynomials of
+    # degree ≤ ⌊(k-2)/2⌋, then integrate twice to obtain C₂,…,Cₖ. By
+    # Hilbert's theorem two squares already span every univariate
+    # nonnegative polynomial, so this guarantees Φ is globally convex.
+    # Pick C₁ ∈ (-Φ'(1), 0) so that Φ has its minimizer in (0, 1).
+    # For odd k, Cₖ stays 0 (an odd-degree Φ'' cannot be globally ≥ 0).
     if length(C) != k
-        C = rand(k)
+        C = zeros(k)
+        m = (k - 2) ÷ 2
+        for _ = 1:2
+            p = rand(m + 1) .* 2 .- 1
+            for i = 2:(2*m + 2)
+                for a = max(0, i - 2 - m):min(m, i - 2)
+                    C[i] += p[a + 1] * p[(i - 2 - a) + 1]
+                end
+            end
+        end
+        for i = 2:(2*m + 2)
+            C[i] /= i * (i - 1)
+        end
+        C[1] = -rand() * sum(i * C[i] for i = 2:k)
     end
-    C[1] = max(-0.1, -0.5*C[2]) # TODO: switch to a more reasonable choice
     # check if the orthogonal matrix is supplied
     if size(D) != (n,m)
         D = rand(n,m) .* 2 .- 1
