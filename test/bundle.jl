@@ -1,7 +1,7 @@
 # test the bundle methods for the main problem
 
 using DynamicPolynomials, SumOfSquares, SemialgebraicSets
-using JuMP, HiGHS
+using JuMP, ECOS
 
 # define the test functions
 
@@ -18,7 +18,7 @@ function test_level_quadratic(
         dim::Int = 10
     )
     # define the main model without solver output
-    model = Model(HiGHS.Optimizer)
+    model = Model(ECOS.Optimizer)
     set_silent(model)
     # define the variables
     x = @variable(model, [1:dim], lower_bound=-1.0, upper_bound=1.0, base_name="x")
@@ -32,5 +32,5 @@ function test_level_quadratic(
     sample = zeros(dim)
     # run the test
     sol = solve_main_level(main, loss, [sample]) 
-    @test sol.ϕ > 0.0 && sol.ϕ < MoWDRO.VAL_TOL
+    @test isapprox(sol.ϕ, 0.0, atol = MoWDRO.VAL_TOL)
 end

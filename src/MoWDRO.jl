@@ -14,7 +14,7 @@ const DEFAULT_SDP = CSDP.Optimizer
 export MainProblem, MainSolution, WassInfo
 export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
 export solve_main_level, eval_nominal, eval_moment_Wass
-export solve_two_stage_copos
+export solve_two_stage_copos, eval_noncvx_Wass
 
 # define module-wide shared parameters
 const NUM_DIG = 6
@@ -33,6 +33,7 @@ include("level_bundle.jl")
 
 # include baseline reformulations
 include("baseline/copos_form.jl")
+include("baseline/noncvx_form.jl")
 
 
 end

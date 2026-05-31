@@ -17,8 +17,17 @@ function solve_main_level(
         min_phi::Float64 = -VAL_INF,
         level::Float64 = DEFAULT_LEVEL,
         mom_solver = DEFAULT_SDP,
+        cut_evaluator = nothing,
         print::Int = 1
     )::MainSolution where T <: SampleSubproblem
+    # `cut_evaluator` lets the caller swap the inner-supremum solver used to
+    # generate cuts for `MainProblem.ϕ`. When `nothing`, fall back to the
+    # moment-relaxation evaluator with the supplied `mom_solver` (default).
+    eval_cut = isnothing(cut_evaluator) ?
+        (subproblem, augstate, samples, wassinfo; print=0) ->
+            eval_moment_Wass(subproblem, augstate, samples, wassinfo;
+                             mom_solver=mom_solver, print=print) :
+        cut_evaluator
     # check if Wasserstein ambiguity is needed
     flag_Wass = false
     if wassinfo.r > VAL_TOL
@@ -50,7 +59,7 @@ function solve_main_level(
     # get the initial upper bound
     cut = zeros(dim_x+2)
     if flag_Wass
-        cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo, mom_solver=mom_solver, print=print-1)
+        cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
     end
@@ -124,7 +133,7 @@ function solve_main_level(
         # get an updated upper bound
         cut = zeros(dim_x+2)
         if flag_Wass
-            cut = eval_moment_Wass(subproblem, [sol_x;sol_w], samples, wassinfo, mom_solver=mom_solver, print=print-1)
+            cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
         end
