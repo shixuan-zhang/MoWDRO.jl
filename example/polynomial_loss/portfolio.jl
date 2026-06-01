@@ -9,13 +9,15 @@
 using JuMP, HiGHS
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
+using Gurobi
+const GRB_ENV = Gurobi.Env()
 include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_VAR = 5
-const NUM_FAC = 10
-const DEG_LOSS = 2
+const NUM_VAR = 3
+const NUM_FAC = 2
+const DEG_LOSS = 4
 
 const MIN_AUX = 1.0e-1
 const MAX_AUX = 1.0e3
@@ -64,16 +66,16 @@ function experiment_portfolio(
     # For odd k, Cₖ stays 0 (an odd-degree Φ'' cannot be globally ≥ 0).
     if length(C) != k
         C = zeros(k)
-        m = (k - 2) ÷ 2
+        l = (k-2) ÷ 2
         for _ = 1:2
-            p = rand(m + 1) .* 2 .- 1
-            for i = 2:(2*m + 2)
-                for a = max(0, i - 2 - m):min(m, i - 2)
-                    C[i] += p[a + 1] * p[(i - 2 - a) + 1]
+            p = rand(l+1) .* 2 .- 1
+            for i = 2:(2* + 2)
+                for a = max(0, i-2-l):min(l, i-2)
+                    C[i] += p[a+1] * p[(i-2-a)+1]
                 end
             end
         end
-        for i = 2:(2*m + 2)
+        for i = 2:(2*l + 2)
             C[i] /= i * (i - 1)
         end
         C[1] = -rand() * sum(i * C[i] for i = 2:k)
@@ -177,17 +179,24 @@ function experiment_portfolio(
         # ---------------------------------------------------------------
         # Optional: solve the same instance with the nonconvex global
         # baseline (level bundle with `eval_noncvx_Wass`) at the same
-        # Wasserstein radius and record `NCVX_*`. The inner polynomial
-        # supremum uses the default `eval_noncvx_Wass` backend (SCIP).
+        # Wasserstein radius and record `NCVX_*`. 
         if baseline == "noncvx"
             println("Solve the same instance with the nonconvex global baseline...")
-            model_NC = Model(HiGHS.Optimizer)
+            model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_silent(model_NC)
             x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= 1, base_name="x_NC")
             w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
             ϕ_NC = @variable(model_NC, ϕ_NC >= 0, base_name="ϕ_NC")
             @constraint(model_NC, ones(n)'*x_NC == 1)
             main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, f_x, Float64[])
+            noncvx_solver = () -> begin
+                opt = Gurobi.Optimizer(GRB_ENV)
+                MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
+                opt
+            end
+            eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
+                eval_noncvx_Wass(subproblem, augstate, samples, wassinfo;
+                                 noncvx_solver=noncvx_solver, print=print)
             time_start_NC = time()
             sol_NC = solve_main_level(main_NC,
                                       loss,
