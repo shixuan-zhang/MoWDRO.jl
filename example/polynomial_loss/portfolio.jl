@@ -48,7 +48,13 @@ function experiment_portfolio(
         M::Int = NUM_TEST;   # number of testing samples
         C::Vector{Float64} = zeros(0), # loss function coefficients
         D::Matrix{Float64} = zeros(0,0), # dependence matrix in the factor model
-        f_x::Vector{Float64} = zeros(0)
+        f_x::Vector{Float64} = zeros(0),
+        baseline::String = "none",       # string for baseline methods for comparison:
+                                         #   "none"   — none
+                                         #   "noncvx" — nonconvex global (`eval_noncvx_Wass`)
+    )
+    baseline in ("none", "noncvx") || error(
+        "baseline must be one of \"none\", \"noncvx\"; got \"$baseline\""
     )
     # Sample Φ''(t) = p₁(t)² + p₂(t)² with p₁, p₂ random polynomials of
     # degree ≤ ⌊(k-2)/2⌋, then integrate twice to obtain C₂,…,Cₖ. By
@@ -113,6 +119,16 @@ function experiment_portfolio(
     TEST_MED   = Float64[]
     TEST_Q90   = Float64[]
     TEST_Q10   = Float64[]
+    # nonconvex-baseline outputs (defined only if baseline == "noncvx")
+    if baseline == "noncvx"
+        NCVX_OBJ   = Float64[]
+        NCVX_TIME  = Float64[]
+        NCVX_MEAN  = Float64[]
+        NCVX_STD   = Float64[]
+        NCVX_MED   = Float64[]
+        NCVX_Q90   = Float64[]
+        NCVX_Q10   = Float64[]
+    end
     # loop over all Wasserstein robustness settings
     for wassinfo in W
         # define the main linear optimization problem 
@@ -158,6 +174,47 @@ function experiment_portfolio(
         append!(TEST_Q10, vec_quant[1])
         append!(TEST_MED, vec_quant[2])
         append!(TEST_Q90, vec_quant[3])
+        # ---------------------------------------------------------------
+        # Optional: solve the same instance with the nonconvex global
+        # baseline (level bundle with `eval_noncvx_Wass`) at the same
+        # Wasserstein radius and record `NCVX_*`. The inner polynomial
+        # supremum uses the default `eval_noncvx_Wass` backend (SCIP).
+        if baseline == "noncvx"
+            println("Solve the same instance with the nonconvex global baseline...")
+            model_NC = Model(HiGHS.Optimizer)
+            set_silent(model_NC)
+            x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= 1, base_name="x_NC")
+            w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
+            ϕ_NC = @variable(model_NC, ϕ_NC >= 0, base_name="ϕ_NC")
+            @constraint(model_NC, ones(n)'*x_NC == 1)
+            main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, f_x, Float64[])
+            time_start_NC = time()
+            sol_NC = solve_main_level(main_NC,
+                                      loss,
+                                      sample_train,
+                                      wassinfo,
+                                      print=1,
+                                      opt_gap=OPT_GAP,
+                                      max_aux=MAX_AUX,
+                                      min_aux=MIN_AUX,
+                                      min_phi=MIN_PHI,
+                                      cut_evaluator=eval_noncvx_Wass)
+            time_finish_NC = time()
+            println("  Nonconvex baseline x          = ", sol_NC.x)
+            println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)
+            println("  Nonconvex baseline time       = ", time_finish_NC - time_start_NC)
+            _, vals_NC = eval_nominal(loss, sol_NC.x, sample_test, details=true)
+            append!(NCVX_OBJ,  sol_NC.f + sol_NC.ϕ)
+            append!(NCVX_TIME, time_finish_NC - time_start_NC)
+            append!(NCVX_MEAN, mean(vals_NC) + sol_NC.f)
+            append!(NCVX_STD,  std(vals_NC))
+            vec_quant_NC = quantile(vals_NC .+ sol_NC.f, [0.1, 0.5, 0.9])
+            append!(NCVX_Q10, vec_quant_NC[1])
+            append!(NCVX_MED, vec_quant_NC[2])
+            append!(NCVX_Q90, vec_quant_NC[3])
+            println("  Nonconvex baseline test mean  = ", mean(vals_NC) + sol_NC.f)
+            println("  Nonconvex baseline test std   = ", std(vals_NC))
+        end
         output = DataFrame(:WASS_DEG   => WASS_DEG,
                            :WASS_RAD   => WASS_RAD,
                            :TRAIN_TIME => TRAIN_TIME,
@@ -167,6 +224,15 @@ function experiment_portfolio(
                            :TEST_Q10   => TEST_Q10,
                            :TEST_MED   => TEST_MED,
                            :TEST_Q90   => TEST_Q90)
+        if baseline == "noncvx"
+            output.NCVX_OBJ  = NCVX_OBJ
+            output.NCVX_TIME = NCVX_TIME
+            output.NCVX_MEAN = NCVX_MEAN
+            output.NCVX_STD  = NCVX_STD
+            output.NCVX_Q10  = NCVX_Q10
+            output.NCVX_MED  = NCVX_MED
+            output.NCVX_Q90  = NCVX_Q90
+        end
         CSV.write(OUTPUT_FILE, output)
         println("Update the result in ", OUTPUT_FILE)
         println("\n\n")
@@ -175,4 +241,4 @@ end
 
 
 # run the experiment
-experiment_portfolio(NUM_VAR, NUM_FAC, DEG_LOSS, WASS_INFO)
+experiment_portfolio(NUM_VAR, NUM_FAC, DEG_LOSS, WASS_INFO, baseline="noncvx")
