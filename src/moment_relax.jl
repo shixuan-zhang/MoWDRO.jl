@@ -64,13 +64,16 @@ function eval_moment_Wass(
             end
             push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂])
         else 
-            println("DEBUG: the moment relaxation degree is ", relaxdeg)
-            println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
-            println("DEBUG: the moment relaxation objective is\n", f-w̄*p)
-            println("DEBUG: the current main problem solution is\n", x̄)
-            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
-            println("DEBUG: the moment relaxation model is\n", model)
-            error("The moment relaxation has failed with status: ", termination_status(model))
+            if print > 0
+                println("DEBUG: the moment relaxation degree is ", relaxdeg)
+                println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
+                println("DEBUG: the moment relaxation objective is\n", f-w̄*p)
+                println("DEBUG: the current main problem solution is\n", x̄)
+                println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+                println("DEBUG: the moment relaxation model is\n", model)
+                println("The moment relaxation has failed with status: ", termination_status(model))
+            end
+            return nothing
         end
     end
     # return the aggregate cut
@@ -175,13 +178,16 @@ function eval_moment_Wass(
             end
             push!(cuts, [ĉ;wassinfo.r^wassinfo.p-p̂])
         else
-            println("DEBUG: the moment relaxation degree is ", relaxdeg)
-            println("DEBUG: the moment relaxation domain is\n", S)
-            println("DEBUG: the moment relaxation objective is\n", f)
-            println("DEBUG: the current main problem solution is\n", x̄)
-            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
-            println("DEBUG: the moment relaxation model is\n", model)
-            error("The moment relaxation has failed with status: ", termination_status(model))
+            if print > 0
+                println("DEBUG: the moment relaxation degree is ", relaxdeg)
+                println("DEBUG: the moment relaxation domain is\n", S)
+                println("DEBUG: the moment relaxation objective is\n", f)
+                println("DEBUG: the current main problem solution is\n", x̄)
+                println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+                println("DEBUG: the moment relaxation model is\n", model)
+                println("The moment relaxation has failed with status: ", termination_status(model))
+            end
+            return nothing
         end
     end
     # return the aggregate cut to the main problem

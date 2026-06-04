@@ -31,8 +31,8 @@ include("../../src/MoWDRO.jl")
 using .MoWDRO
 
 # experiment parameters
-const NUM_FACILITY = 5
-const NUM_SITE = 20
+const NUM_FACILITY = 3 # 5
+const NUM_SITE = 4 #20
 const COST_HOLDING = 1.0
 const COST_SUBCONTRACT = 10.0
 const MEAN_DEMAND = 3.0
@@ -43,7 +43,7 @@ const MIN_AUX = 1.0e-1
 const MAX_AUX = 1.0e4
 const MIN_PHI = 0.0
 const OPT_GAP = 1.0e-2
-const NUM_TRAIN = 10 
+const NUM_TRAIN = 5 #10 
 const NUM_TEST = 10000
 const DEG_WASS = 2
 const NUM_DIG = 3
@@ -56,6 +56,106 @@ if length(ARGS) > 0
     OUTPUT_FILE = ARGS[1]
 end
 
+# Build the data tuple for the Hanasusanto-Kuhn (2018) copositive baseline
+# `solve_two_stage_copos` from the allocation-problem parameters. The
+# returned NamedTuple has fields (c, X, Q, q, T, h, W, S, t) matching the
+# positional arguments expected by `solve_two_stage_copos`.
+function build_copos_baseline_data(
+        n::Int, m::Int,
+        d::Vector{Float64}, P::Matrix{Float64},
+        D::Float64, s::Float64, h::Float64,
+    )
+    # The allocation primal recourse is a MAX-LP in y = (u; v) ∈ ℝ^{n+m}:
+    #   F(x, ξ) = max  x^T u + ξ^T v
+    #     s.t.   P [u; v] ≤ d                 (n·m distance constraints)
+    #           -s·1_n ≤ u ≤ h·1_n            (n inventory bounds)
+    #            0·1_m ≤ v ≤ s·1_m            (m subcontract bounds)
+    # Stack the inequalities as  K y ≤ ℓ  with
+    #   K = [ P        ;        ℓ = [ d      ;
+    #        -I_n  0   ;               s·1_n ;
+    #         I_n  0   ;               h·1_n ;
+    #         0   -I_m ;               0·1_m ;
+    #         0    I_m ]                s·1_m ]
+    # of row dimension N_μ = n·m + 2n + 2m.  By LP duality (primal bounded
+    # ⇒ strong duality)
+    #   F(x, ξ) = min ℓ^T μ   s.t.  K^T μ = [x; ξ],  μ ≥ 0,
+    # which is exactly paper Eq. (3) form
+    #   Z(x, ξ) = inf (Qξ + q)^T y  s.t.  T(x)ξ + h(x) ≤ W y
+    # with paper's y ≡ μ, Q = 0 (the dual cost has no ξ-dependence), q = ℓ,
+    # the (n+m) equalities K^T μ = [x; ξ] split into 2(n+m) inequalities,
+    # and the N_μ sign constraints μ ≥ 0 folded into W.  This yields
+    # M = 2(n+m) + N_μ = 4n + 4m + n·m rows before the support-set
+    # extension.  The "sufficient expensive recourse" assumption of the
+    # paper holds because every component of the dual cost q = ℓ ≥ 0.
+    N_y_HK = n*m + 2n + 2m              # dim of paper's y = dual variable μ
+    K_HK   = m                          # dim(ξ) — only m random demand factors
+    Mh_HK  = 2*(n + m) + N_y_HK         # row dim of W before support extension
+    #         = 4n + 4m + n·m
+    # Assemble K and ℓ from the primal allocation constraints (K y ≤ ℓ).
+    K_mat = [P;
+             -Matrix{Float64}(I, n, n)  zeros(n, m);
+              Matrix{Float64}(I, n, n)  zeros(n, m);
+              zeros(m, n)              -Matrix{Float64}(I, m, m);
+              zeros(m, n)               Matrix{Float64}(I, m, m)]
+    ℓ_vec = [d; s*ones(n); h*ones(n); zeros(m); s*ones(m)]
+    # Paper cost (Qξ + q)^T y on y = μ equals ℓ^T μ:
+    #   no ξ-dependence  →  Q_HK = 0,  q_HK = ℓ.
+    Q_HK = zeros(N_y_HK, K_HK)
+    q_HK = copy(ℓ_vec)
+    # Paper constraint matrix W (4n+4m+n·m rows × N_μ cols).
+    # The equality K^T μ = [x; ξ] splits into K^T μ ≥ [x; ξ] and K^T μ ≤ [x; ξ].
+    # Rewriting each in the paper's "T(x)ξ + h(x) ≤ W μ" sense gives:
+    #   • upper-split rows  [1 .. n+m]            :  [x; ξ] ≤  K^T μ   →  W = +K^T, RHS = [x; ξ]
+    #   • lower-split rows  [n+m+1 .. 2(n+m)]     : -[x; ξ] ≤ -K^T μ   →  W = -K^T, RHS = -[x; ξ]
+    #   • sign-constraint rows  [2(n+m)+1 .. end]:        0 ≤  μ      →  W = I_{N_μ}, RHS = 0.
+    W_HK = zeros(Mh_HK, N_y_HK)
+    W_HK[1:(n+m),                    :] .=  K_mat'                       # upper-split
+    W_HK[(n+m+1):(2*(n+m)),          :] .= -K_mat'                       # lower-split
+    W_HK[(2*(n+m)+1):Mh_HK,          :] .=  Matrix{Float64}(I, N_y_HK, N_y_HK)
+    # Affine decomposition T(x) = T_0 + Σ_l x_l T_l, h(x) = h_0 + Σ_l x_l h_l
+    # stored 1-indexed: T_HK[l+1] == T_l, h_HK[l+1] == h_l  (length n+1).
+    # The RHS T(x)ξ + h(x) at the various row blocks is:
+    #   block 1 (upper-split rows 1..n+m), RHS = +[x; ξ]:
+    #     row i ≤ n           :  +x_i        →  h_HK[i+1][i]                 = +1
+    #     row n+j  (1 ≤ j ≤ m):  +ξ_j        →  T_HK[1][n+j, j]              = +1
+    #   block 2 (lower-split rows (n+m)+1..2(n+m)), RHS = -[x; ξ]:
+    #     row (n+m)+i (i ≤ n) :  -x_i        →  h_HK[i+1][(n+m)+i]           = -1
+    #     row (n+m)+(n+j)     :  -ξ_j        →  T_HK[1][(n+m)+(n+j), j]      = -1
+    #   block 3 (sign rows)   :   0          →  no entries (T = 0, h = 0).
+    T_HK = [zeros(Mh_HK, K_HK) for _ in 0:n]
+    h_HK = [zeros(Mh_HK)       for _ in 0:n]
+    # block 1: upper-split
+    for i = 1:n
+        h_HK[i + 1][i] = 1.0
+    end
+    for j = 1:m
+        T_HK[1][n + j, j] = 1.0
+    end
+    # block 2: lower-split
+    for i = 1:n
+        h_HK[i + 1][(n + m) + i] = -1.0
+    end
+    for j = 1:m
+        T_HK[1][(n + m) + (n + j), j] = -1.0
+    end
+    # Support set Ξ = ℝ^m_+ — only ξ_j ≥ 0 (LogNormal demand samples have
+    # no natural upper bound), so S has zero rows.
+    S_HK = zeros(0, K_HK)
+    t_HK = zeros(0)
+    # First-stage polyhedron X = [0, D]^n encoded row-by-row as [a_i; b_i]:
+    X_HK = Vector{Vector{Float64}}()
+    for i = 1:n
+        a_lo = zeros(n); a_lo[i] = -1.0;  push!(X_HK, [a_lo; 0.0])     # −x_i ≤ 0
+        a_hi = zeros(n); a_hi[i] =  1.0;  push!(X_HK, [a_hi; D])       #  x_i ≤ D
+    end
+    # First-stage cost c = 0 — the allocation `MainProblem` is built with a
+    # zero linear cost (no f_x^T x term).
+    c_HK = zeros(n)
+    return (c = c_HK, X = X_HK,
+            Q = Q_HK, q = q_HK,
+            T = T_HK, h = h_HK, W = W_HK,
+            S = S_HK, t = t_HK)
+end
 
 # function that generates the Euclidean distances between facilities and demand sites
 function generate_distance_pairs(
@@ -96,7 +196,15 @@ function experiment_allocation(
         s::Float64 = COST_SUBCONTRACT, # cost for subcontracted demand
         μ::Float64 = MEAN_DEMAND,      # mean factor for the demand
         σ::Float64 = VAR_DEMAND,       # variance factor for the demand
-        d::Vector{Float64} = zeros(0)  # distance vector
+        d::Vector{Float64} = zeros(0), # distance vector
+        baseline::String = "none",     # string for baseline methods for comparison:
+                                       #   "none"   — none
+                                       #   "copos"  — Hanasusanto-Kuhn (2018) copositive formulation
+                                       #   "noncvx" — nonconvex global optimization formulation
+                                       #   "all"    — both baselines
+    )
+    baseline in ("none", "copos", "noncvx", "all") || error(
+        "baseline must be one of \"none\", \"copos\", \"noncvx\", \"all\"; got \"$baseline\""
     )
     # take the samples of random demands
     sample_train = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:N]
@@ -146,6 +254,26 @@ function experiment_allocation(
     TEST_MED   = Float64[]
     TEST_Q90   = Float64[]
     TEST_Q10   = Float64[]
+    # copositive-baseline outputs (defined only if baseline ∈ ("copos","all"))
+    if baseline in ("copos", "all")
+        COPS_OBJ   = Float64[]
+        COPS_TIME  = Float64[]
+        COPS_MEAN  = Float64[]
+        COPS_STD   = Float64[]
+        COPS_MED   = Float64[]
+        COPS_Q90   = Float64[]
+        COPS_Q10   = Float64[]
+    end
+    # nonconvex-baseline outputs (defined only if baseline ∈ ("noncvx","all"))
+    if baseline in ("noncvx", "all")
+        NCVX_OBJ   = Float64[]
+        NCVX_TIME  = Float64[]
+        NCVX_MEAN  = Float64[]
+        NCVX_STD   = Float64[]
+        NCVX_MED   = Float64[]
+        NCVX_Q90   = Float64[]
+        NCVX_Q10   = Float64[]
+    end
     # loop over all Wasserstein robustness settings
     for wassinfo in W
         # define the main linear/quadratic optimization problem 
@@ -190,6 +318,95 @@ function experiment_allocation(
         append!(TEST_Q10, vec_quant[1])
         append!(TEST_MED, vec_quant[2])
         append!(TEST_Q90, vec_quant[3])
+        # ---------------------------------------------------------------
+        # Optional: solve the same instance with the H-K (2018) copositive
+        # baseline at the same Wasserstein radius and record `COPS_*`.
+        if baseline in ("copos", "all")
+            # Build paper Eq.(1)+Eq.(3) data for the Hanasusanto-Kuhn (2018)
+            # copositive baseline; see `build_copos_baseline_data` for details.
+            data_HK = build_copos_baseline_data(n, m, d, P, D, s, h)
+            println("Built copositive-baseline data: matrix size = ",
+                    m + (4n + 4m + n*m) + 1,
+                    " per sample (", N, " samples).")
+            println("Solve the same instance with the Hanasusanto-Kuhn copositive baseline...")
+            time_start_HK = time()
+            res_HK = solve_two_stage_copos(data_HK.c, data_HK.X,
+                                           data_HK.Q, data_HK.q,
+                                           data_HK.T, data_HK.h, data_HK.W,
+                                           data_HK.S, data_HK.t,
+                                           sample_train, wassinfo.r;
+                                           solver = Mosek.Optimizer,
+                                           silent = true,
+                                           δ = 0.0)
+            time_finish_HK = time()
+            println("  Copositive baseline status    = ", res_HK.status)
+            println("  Copositive baseline x         = ", res_HK.x)
+            println("  Copositive baseline objective = ", res_HK.objective_value)
+            println("  Copositive baseline time      = ", time_finish_HK - time_start_HK)
+            # out-of-sample test on the H-K solution using the same test samples
+            _, vals_HK = eval_nominal(recourse, res_HK.x, sample_test, details=true)
+            f_HK = 0.0    # allocation main problem has no first-stage cost
+            append!(COPS_OBJ,  res_HK.objective_value)
+            append!(COPS_TIME, time_finish_HK - time_start_HK)
+            append!(COPS_MEAN, mean(vals_HK) + f_HK)
+            append!(COPS_STD,  std(vals_HK))
+            vec_quant_HK = quantile(vals_HK .+ f_HK, [0.1, 0.5, 0.9])
+            append!(COPS_Q10, vec_quant_HK[1])
+            append!(COPS_MED, vec_quant_HK[2])
+            append!(COPS_Q90, vec_quant_HK[3])
+            println("  Copositive baseline test mean = ", mean(vals_HK) + f_HK)
+            println("  Copositive baseline test std  = ", std(vals_HK))
+        end
+        # ---------------------------------------------------------------
+        # Optional: solve the same instance with the nonconvex global
+        # baseline (level bundle with `eval_noncvx_Wass`) at the same
+        # Wasserstein radius and record `NCVX_*`. The inner polynomial
+        # supremum is routed to Gurobi with `NonConvex=2`.
+        if baseline in ("noncvx", "all")
+            println("Solve the same instance with the nonconvex global baseline...")
+            model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
+            set_attribute(model_NC, "OutputFlag", 0)
+            x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= D, base_name="x_NC")
+            w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
+            ϕ_NC = @variable(model_NC, ϕ_NC, base_name="ϕ_NC")
+            main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
+            noncvx_solver = () -> begin
+                opt = Gurobi.Optimizer(GRB_ENV)
+                MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
+                opt
+            end
+            eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
+                eval_noncvx_Wass(subproblem, augstate, samples, wassinfo;
+                                 noncvx_solver=noncvx_solver, print=print)
+            time_start_NC = time()
+            sol_NC = solve_main_level(main_NC,
+                                      recourse,
+                                      sample_train,
+                                      wassinfo,
+                                      print=1,
+                                      opt_gap=OPT_GAP,
+                                      max_aux=MAX_AUX,
+                                      min_aux=MIN_AUX,
+                                      min_phi=MIN_PHI,
+                                      cut_evaluator=eval_noncvx_cut)
+            time_finish_NC = time()
+            println("  Nonconvex baseline x          = ", sol_NC.x)
+            println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)
+            println("  Nonconvex baseline time       = ", time_finish_NC - time_start_NC)
+            # out-of-sample test on the nonconvex-baseline solution
+            _, vals_NC = eval_nominal(recourse, sol_NC.x, sample_test, details=true)
+            append!(NCVX_OBJ,  sol_NC.f + sol_NC.ϕ)
+            append!(NCVX_TIME, time_finish_NC - time_start_NC)
+            append!(NCVX_MEAN, mean(vals_NC) + sol_NC.f)
+            append!(NCVX_STD,  std(vals_NC))
+            vec_quant_NC = quantile(vals_NC .+ sol_NC.f, [0.1, 0.5, 0.9])
+            append!(NCVX_Q10, vec_quant_NC[1])
+            append!(NCVX_MED, vec_quant_NC[2])
+            append!(NCVX_Q90, vec_quant_NC[3])
+            println("  Nonconvex baseline test mean  = ", mean(vals_NC) + sol_NC.f)
+            println("  Nonconvex baseline test std   = ", std(vals_NC))
+        end
+        # write the (possibly augmented) result file
         output = DataFrame(:WASS_DEG   => WASS_DEG,
                            :WASS_RAD   => WASS_RAD,
                            :TRAIN_TIME => TRAIN_TIME,
@@ -199,6 +416,24 @@ function experiment_allocation(
                            :TEST_Q10   => TEST_Q10,
                            :TEST_MED   => TEST_MED,
                            :TEST_Q90   => TEST_Q90)
+        if baseline in ("copos", "all")
+            output.COPS_OBJ  = COPS_OBJ
+            output.COPS_TIME = COPS_TIME
+            output.COPS_MEAN = COPS_MEAN
+            output.COPS_STD  = COPS_STD
+            output.COPS_Q10  = COPS_Q10
+            output.COPS_MED  = COPS_MED
+            output.COPS_Q90  = COPS_Q90
+        end
+        if baseline in ("noncvx", "all")
+            output.NCVX_OBJ  = NCVX_OBJ
+            output.NCVX_TIME = NCVX_TIME
+            output.NCVX_MEAN = NCVX_MEAN
+            output.NCVX_STD  = NCVX_STD
+            output.NCVX_Q10  = NCVX_Q10
+            output.NCVX_MED  = NCVX_MED
+            output.NCVX_Q90  = NCVX_Q90
+        end
         CSV.write(OUTPUT_FILE, output)
         println("Update the result in ", OUTPUT_FILE)
         println("\n\n")
@@ -206,4 +441,4 @@ function experiment_allocation(
 end
 
 # run the experiment
-experiment_allocation(NUM_FACILITY,NUM_SITE,WASS_INFO)
+experiment_allocation(NUM_FACILITY,NUM_SITE,WASS_INFO,baseline="copos")
