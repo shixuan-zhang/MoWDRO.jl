@@ -1,13 +1,13 @@
-# numerical example for a two-stage commodity allocation problem 
+# numerical example for a two-stage commodity allocation problem
 # (adapted from Duque, Mehrotra, and Morton (2022)):
-# min E[F(x,ξ)], x ∈ [0,1]ⁿ, where 
+# min E[F(x,ξ)], x ∈ [0,1]ⁿ, where
 # F(x,ξ) := max  ∑ᵢ xᵢ⋅uᵢ + ∑ⱼ ξⱼ⋅vⱼ
 #           s.t. uᵢ + vⱼ ≤ dᵢⱼ,     ∀ i = 1,…,n, j = 1,…,m,
 #                -s ≤ uᵢ ≤ h,       ∀ i = 1,…,n,
 #                0 ≤ vⱼ ≤ s,        ∀ j = 1,…,m.
 # Here, xᵢ ∈ [0,Lᵢ] is the supply allocated to location i,
-# ξⱼ ∼ LogNormal(1,1) is the random demand at site j, 
-# dᵢⱼ > 0 is the Euclidean distance between locations i and j, 
+# ξⱼ ∼ LogNormal(1,1) is the random demand at site j,
+# dᵢⱼ > 0 is the Euclidean distance between locations i and j,
 # where the locations are randomly distributed on [0,1]²;
 # h > 0 is the unit cost for holding inventory,
 # s > 0 is the unit cost for subcontracted demand.
@@ -16,44 +16,73 @@
 #      0 e 0 I;
 #      0 0 e I]
 # for n = 3, any m > 1 in this example.
-# We can then write F in the matrix form as 
+# We can then write F in the matrix form as
 # F(x,ξ) = max  (1,x)ᵀ⋅[0 ξᵀ; 0 I 0]⋅(1,y)
-#          s.t. -P⋅y ≥ -d, 
+#          s.t. -P⋅y ≥ -d,
 #               [I 0; -I 0; 0 I; 0 -I] y ≥ [-s; -h; 0; -s]
 
-using JuMP
+using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
 # use commercial solvers for efficiency and numerical stability
-using Gurobi, Mosek, MosekTools 
+using Gurobi, Mosek, MosekTools
 const GRB_ENV = Gurobi.Env()
-include("../../src/MoWDRO.jl")
+include("../../../src/MoWDRO.jl")
 using .MoWDRO
 
-# experiment parameters
-const NUM_FACILITY = 3 # 5
-const NUM_SITE = 4 #20
-const COST_HOLDING = 1.0
-const COST_SUBCONTRACT = 10.0
-const MEAN_DEMAND = 3.0
-const VAR_DEMAND = 0.2
-const MAX_CAPACITY = 100.0
+# Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
+# TOML with the same base name as the script.
+CONFIG_PATH = if length(ARGS) >= 1
+    ARGS[1]
+else
+    sibling = joinpath(@__DIR__, splitext(basename(@__FILE__))[1] * ".toml")
+    isfile(sibling) || error(
+        "no config supplied and no default sibling TOML at $sibling; " *
+        "usage: julia $(@__FILE__) [<config.toml>]"
+    )
+    sibling
+end
+CONFIG = TOML.parsefile(CONFIG_PATH)
 
-const MIN_AUX = 1.0e-1
-const MAX_AUX = 1.0e4
-const MIN_PHI = 0.0
-const OPT_GAP = 1.0e-2
-const NUM_TRAIN = 5 #10 
-const NUM_TEST = 10000
-const DEG_WASS = 2
-const NUM_DIG = 3
-const WASS_INFO = [[WassInfo(round(i*1.0e-2,digits=NUM_DIG),DEG_WASS) for i in 0:9];
-                  [WassInfo(round(i*1.0e-1,digits=NUM_DIG),DEG_WASS) for i in 1:9];
-                  [WassInfo(round(i*1.0e0,digits=NUM_DIG),DEG_WASS) for i in 1:10]]
+# bind problem-specific settings from [problem]
+const PROB_CFG = CONFIG["problem"]
+NUM_FACILITY     = Int(PROB_CFG["number of facilities"])
+NUM_SITE         = Int(PROB_CFG["number of sites"])
+COST_HOLDING     = Float64(PROB_CFG["holding cost"])
+COST_SUBCONTRACT = Float64(PROB_CFG["subcontract cost"])
+MEAN_DEMAND      = Float64(PROB_CFG["mean demand"])
+VAR_DEMAND       = Float64(PROB_CFG["demand variance"])
+MAX_CAPACITY     = Float64(PROB_CFG["maximum capacity"])
+NUM_DIG          = Int(PROB_CFG["number of digits"])
 
-OUTPUT_FILE = "../result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv"
-if length(ARGS) > 0
-    OUTPUT_FILE = ARGS[1]
+# bind experiment-wide settings from [experiment]
+const EXP_CFG = CONFIG["experiment"]
+TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
+NUM_TEST    = Int(EXP_CFG["testing sample size"])
+OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
+MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
+MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
+MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
+BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+# Wasserstein radii from explicit list and/or {start, stop, step} sweeps;
+# rounded to NUM_DIG digits to match the rest of the allocation data.
+WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
+WASS_RADII = Float64[]
+if haskey(EXP_CFG, "Wasserstein radii")
+    append!(WASS_RADII, Float64.(EXP_CFG["Wasserstein radii"]))
+end
+if haskey(EXP_CFG, "Wasserstein sweeps")
+    for sw in EXP_CFG["Wasserstein sweeps"]
+        append!(WASS_RADII, collect(Float64(sw["start"]):Float64(sw["step"]):Float64(sw["stop"])))
+    end
+end
+WASS_RADII = round.(WASS_RADII; digits=NUM_DIG)
+
+# OUTPUT_FILE: derived from script name + problem params; allow ARGS[2] override.
+OUTPUT_FILE = if length(ARGS) >= 2
+    ARGS[2]
+else
+    joinpath(@__DIR__, "..", "result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv")
 end
 
 # Build the data tuple for the Hanasusanto-Kuhn (2018) copositive baseline
@@ -186,18 +215,19 @@ end
 
 # function that conducts experiments on the facility allocation problem
 function experiment_allocation(
-        n::Int,              # number of facilities
-        m::Int,              # number of demand sites
-        W::Vector{WassInfo}, # list of Wasserstein robustness settings to be used 
-        N::Int = NUM_TRAIN,  # number of training samples
-        M::Int = NUM_TEST;   # number of testing samples
+        n::Int,                  # number of facilities
+        m::Int,                  # number of demand sites
+        wass_radii::Vector{Float64},        # Wasserstein radii to sweep
+        wass_order::Int,                    # shared Wasserstein order (p)
+        N_arr::Vector{Int} = TRAIN_SIZES,   # list of training-sample sizes to sweep
+        M::Int = NUM_TEST;       # number of testing samples
         D::Float64 = MAX_CAPACITY,     # maximum facility capacity
         h::Float64 = COST_HOLDING,     # cost for holding inventory
         s::Float64 = COST_SUBCONTRACT, # cost for subcontracted demand
         μ::Float64 = MEAN_DEMAND,      # mean factor for the demand
         σ::Float64 = VAR_DEMAND,       # variance factor for the demand
         d::Vector{Float64} = zeros(0), # distance vector
-        baseline::String = "none",     # string for baseline methods for comparison:
+        baseline::String = BASELINE,   # string for baseline methods for comparison:
                                        #   "none"   — none
                                        #   "copos"  — Hanasusanto-Kuhn (2018) copositive formulation
                                        #   "noncvx" — nonconvex global optimization formulation
@@ -206,9 +236,12 @@ function experiment_allocation(
     baseline in ("none", "copos", "noncvx", "all") || error(
         "baseline must be one of \"none\", \"copos\", \"noncvx\", \"all\"; got \"$baseline\""
     )
-    # take the samples of random demands
-    sample_train = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:N]
-    sample_test = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:M]
+    isempty(N_arr) && error("training sample sizes array must be non-empty")
+    # take the samples of random demands (draw the largest training set once,
+    # then later iterations reuse a strict prefix of it)
+    N_max = maximum(N_arr)
+    sample_train_full = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:N_max]
+    sample_test       = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:M]
     # construct the pairwise indicator matrix
     P = zeros(m*n, m+n)
     for i = 1:n
@@ -223,11 +256,11 @@ function experiment_allocation(
     end
     # declare the recourse variables (y = [u,v])
     @polyvar x[1:n] ξ[1:m] y[1:n+m]
-    # define the two-stage linear recourse function, 
+    # define the two-stage linear recourse function,
     C = [zeros(n+1)' ξ'; zeros(n) I zeros(n,m)]
     A = [-P; I zeros(n,m); -I zeros(n,m); zeros(m,n) I; zeros(m,n) -I] .+ 0.0*sum(ξ) # to promote the type
     b = [-d; -s*ones(n); -h*ones(n); zeros(m); -s*ones(m)] .+ 0.0*sum(ξ) # to promote the type
-    Ξ = basicsemialgebraicset(FullSpace(), 
+    Ξ = basicsemialgebraicset(FullSpace(),
                               [ξ[i] for i in 1:m]
                               )
     B = s * ones(n+m)
@@ -239,14 +272,15 @@ function experiment_allocation(
     println("The cost of subcontracted demand is ", s)
     println("The cost of holding inventory is ", h)
     println("The maximum facility capacity is ", D)
-    println("The number of training samples is ", N)
-    println("The number of testing samples is ", M)
+    println("Training sample sizes to sweep: ", N_arr)
+    println("Number of testing samples: ", M)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
     println("The second-stage constraints are ", A*y - b)
     println()
     # prepare the table for output
     WASS_RAD   = Float64[]
     WASS_DEG   = Int[]
+    TRAIN_SIZE = Int[]
     TRAIN_OBJ  = Float64[]
     TRAIN_TIME = Float64[]
     TEST_MEAN  = Float64[]
@@ -274,171 +308,181 @@ function experiment_allocation(
         NCVX_Q90   = Float64[]
         NCVX_Q10   = Float64[]
     end
-    # loop over all Wasserstein robustness settings
-    for wassinfo in W
-        # define the main linear/quadratic optimization problem 
-        model = Model(() -> Gurobi.Optimizer(GRB_ENV))
-        set_attribute(model, "OutputFlag", 0)
-        x = @variable(model, 0 <= x[1:n] <= D, base_name="x")
-        w = @variable(model, w >= 0, base_name="w")
-        ϕ = @variable(model, ϕ, base_name="ϕ")
-        main = MainProblem(model, x, VariableRef[], w, ϕ, zeros(n), Float64[])
-        # solve the problem
-        time_start = time()
-        sol = solve_main_level(main, 
-                               recourse, 
-                               sample_train, 
-                               wassinfo, 
-                               print=1, 
-                               opt_gap=OPT_GAP,
-                               max_aux=MAX_AUX,
-                               min_aux=MIN_AUX,
-                               min_phi=MIN_PHI,
-                               mom_solver=Mosek.Optimizer)
-        time_finish = time()
-        println("The main problem is solved successfully for Wasserstein radius = ", wassinfo.r)
-        println("x = ", sol.x)
-        println("f = ", sol.f)
-        println("ϕ = ", sol.ϕ)
-        println("The training sample objective = ", sol.f+sol.ϕ)
-        println("The total computation time is ", time_finish-time_start)
-        println("Start the out-of-sample test for the solution...")
-        # evaluate the out-of-sample performance
-        _, vals = eval_nominal(recourse, sol.x, sample_test, details=true)
-        println("The testing sample mean = ", mean(vals)+sol.f)
-        println("The testing sample standard deviation = ", std(vals))
-        # update the output file
-        append!(WASS_DEG, wassinfo.p)
-        append!(WASS_RAD, wassinfo.r)
-        append!(TRAIN_TIME, time_finish-time_start)
-        append!(TRAIN_OBJ, sol.f+sol.ϕ)
-        append!(TEST_MEAN, mean(vals)+sol.f)
-        append!(TEST_STD, std(vals))
-        vec_quant = quantile(vals.+sol.f, [0.1,0.5,0.9])
-        append!(TEST_Q10, vec_quant[1])
-        append!(TEST_MED, vec_quant[2])
-        append!(TEST_Q90, vec_quant[3])
-        # ---------------------------------------------------------------
-        # Optional: solve the same instance with the H-K (2018) copositive
-        # baseline at the same Wasserstein radius and record `COPS_*`.
-        if baseline in ("copos", "all")
-            # Build paper Eq.(1)+Eq.(3) data for the Hanasusanto-Kuhn (2018)
-            # copositive baseline; see `build_copos_baseline_data` for details.
-            data_HK = build_copos_baseline_data(n, m, d, P, D, s, h)
-            println("Built copositive-baseline data: matrix size = ",
-                    m + (4n + 4m + n*m) + 1,
-                    " per sample (", N, " samples).")
-            println("Solve the same instance with the Hanasusanto-Kuhn copositive baseline...")
-            time_start_HK = time()
-            res_HK = solve_two_stage_copos(data_HK.c, data_HK.X,
-                                           data_HK.Q, data_HK.q,
-                                           data_HK.T, data_HK.h, data_HK.W,
-                                           data_HK.S, data_HK.t,
-                                           sample_train, wassinfo.r;
-                                           solver = Mosek.Optimizer,
-                                           silent = true,
-                                           δ = 0.0)
-            time_finish_HK = time()
-            println("  Copositive baseline status    = ", res_HK.status)
-            println("  Copositive baseline x         = ", res_HK.x)
-            println("  Copositive baseline objective = ", res_HK.objective_value)
-            println("  Copositive baseline time      = ", time_finish_HK - time_start_HK)
-            # out-of-sample test on the H-K solution using the same test samples
-            _, vals_HK = eval_nominal(recourse, res_HK.x, sample_test, details=true)
-            f_HK = 0.0    # allocation main problem has no first-stage cost
-            append!(COPS_OBJ,  res_HK.objective_value)
-            append!(COPS_TIME, time_finish_HK - time_start_HK)
-            append!(COPS_MEAN, mean(vals_HK) + f_HK)
-            append!(COPS_STD,  std(vals_HK))
-            vec_quant_HK = quantile(vals_HK .+ f_HK, [0.1, 0.5, 0.9])
-            append!(COPS_Q10, vec_quant_HK[1])
-            append!(COPS_MED, vec_quant_HK[2])
-            append!(COPS_Q90, vec_quant_HK[3])
-            println("  Copositive baseline test mean = ", mean(vals_HK) + f_HK)
-            println("  Copositive baseline test std  = ", std(vals_HK))
-        end
-        # ---------------------------------------------------------------
-        # Optional: solve the same instance with the nonconvex global
-        # baseline (level bundle with `eval_noncvx_Wass`) at the same
-        # Wasserstein radius and record `NCVX_*`. The inner polynomial
-        # supremum is routed to Gurobi with `NonConvex=2`.
-        if baseline in ("noncvx", "all")
-            println("Solve the same instance with the nonconvex global baseline...")
-            model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
-            set_attribute(model_NC, "OutputFlag", 0)
-            x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= D, base_name="x_NC")
-            w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
-            ϕ_NC = @variable(model_NC, ϕ_NC, base_name="ϕ_NC")
-            main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
-            noncvx_solver = () -> begin
-                opt = Gurobi.Optimizer(GRB_ENV)
-                MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
-                opt
+    # loop over all (training-sample size, Wasserstein radius) combinations
+    for N_curr in N_arr
+        sample_train = sample_train_full[1:N_curr]
+        for r in wass_radii
+            wassinfo = WassInfo(r, wass_order)
+            # define the main linear/quadratic optimization problem
+            model = Model(() -> Gurobi.Optimizer(GRB_ENV))
+            set_attribute(model, "OutputFlag", 0)
+            x = @variable(model, 0 <= x[1:n] <= D, base_name="x")
+            w = @variable(model, w >= 0, base_name="w")
+            ϕ = @variable(model, ϕ, base_name="ϕ")
+            main = MainProblem(model, x, VariableRef[], w, ϕ, zeros(n), Float64[])
+            # solve the problem
+            time_start = time()
+            sol = solve_main_level(main,
+                                   recourse,
+                                   sample_train,
+                                   wassinfo,
+                                   print=1,
+                                   opt_gap=OPT_GAP,
+                                   max_aux=MAX_AUX,
+                                   min_aux=MIN_AUX,
+                                   min_phi=MIN_PHI,
+                                   mom_solver=Mosek.Optimizer)
+            time_finish = time()
+            println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
+                    ", training size = ", N_curr)
+            println("x = ", sol.x)
+            println("f = ", sol.f)
+            println("ϕ = ", sol.ϕ)
+            println("The training sample objective = ", sol.f+sol.ϕ)
+            println("The total computation time is ", time_finish-time_start)
+            println("Start the out-of-sample test for the solution...")
+            # evaluate the out-of-sample performance
+            _, vals = eval_nominal(recourse, sol.x, sample_test, details=true)
+            println("The testing sample mean = ", mean(vals)+sol.f)
+            println("The testing sample standard deviation = ", std(vals))
+            # update the output file
+            append!(WASS_DEG, wassinfo.p)
+            append!(WASS_RAD, wassinfo.r)
+            append!(TRAIN_SIZE, N_curr)
+            append!(TRAIN_TIME, time_finish-time_start)
+            append!(TRAIN_OBJ, sol.f+sol.ϕ)
+            append!(TEST_MEAN, mean(vals)+sol.f)
+            append!(TEST_STD, std(vals))
+            vec_quant = quantile(vals.+sol.f, [0.1,0.5,0.9])
+            append!(TEST_Q10, vec_quant[1])
+            append!(TEST_MED, vec_quant[2])
+            append!(TEST_Q90, vec_quant[3])
+            # ---------------------------------------------------------------
+            # Optional: solve the same instance with the H-K (2018) copositive
+            # baseline at the same Wasserstein radius and record `COPS_*`.
+            if baseline in ("copos", "all")
+                # Build paper Eq.(1)+Eq.(3) data for the Hanasusanto-Kuhn (2018)
+                # copositive baseline; see `build_copos_baseline_data` for details.
+                data_HK = build_copos_baseline_data(n, m, d, P, D, s, h)
+                println("Built copositive-baseline data: matrix size = ",
+                        m + (4n + 4m + n*m) + 1,
+                        " per sample (", N_curr, " samples).")
+                println("Solve the same instance with the Hanasusanto-Kuhn copositive baseline...")
+                time_start_HK = time()
+                res_HK = solve_two_stage_copos(data_HK.c, data_HK.X,
+                                               data_HK.Q, data_HK.q,
+                                               data_HK.T, data_HK.h, data_HK.W,
+                                               data_HK.S, data_HK.t,
+                                               sample_train, wassinfo.r;
+                                               solver = Mosek.Optimizer,
+                                               silent = true,
+                                               δ = 0.0)
+                time_finish_HK = time()
+                println("  Copositive baseline status    = ", res_HK.status)
+                println("  Copositive baseline x         = ", res_HK.x)
+                println("  Copositive baseline objective = ", res_HK.objective_value)
+                println("  Copositive baseline time      = ", time_finish_HK - time_start_HK)
+                # out-of-sample test on the H-K solution using the same test samples
+                _, vals_HK = eval_nominal(recourse, res_HK.x, sample_test, details=true)
+                f_HK = 0.0    # allocation main problem has no first-stage cost
+                append!(COPS_OBJ,  res_HK.objective_value)
+                append!(COPS_TIME, time_finish_HK - time_start_HK)
+                append!(COPS_MEAN, mean(vals_HK) + f_HK)
+                append!(COPS_STD,  std(vals_HK))
+                vec_quant_HK = quantile(vals_HK .+ f_HK, [0.1, 0.5, 0.9])
+                append!(COPS_Q10, vec_quant_HK[1])
+                append!(COPS_MED, vec_quant_HK[2])
+                append!(COPS_Q90, vec_quant_HK[3])
+                println("  Copositive baseline test mean = ", mean(vals_HK) + f_HK)
+                println("  Copositive baseline test std  = ", std(vals_HK))
             end
-            eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
-                eval_noncvx_Wass(subproblem, augstate, samples, wassinfo;
-                                 noncvx_solver=noncvx_solver, print=print)
-            time_start_NC = time()
-            sol_NC = solve_main_level(main_NC,
-                                      recourse,
-                                      sample_train,
-                                      wassinfo,
-                                      print=1,
-                                      opt_gap=OPT_GAP,
-                                      max_aux=MAX_AUX,
-                                      min_aux=MIN_AUX,
-                                      min_phi=MIN_PHI,
-                                      cut_evaluator=eval_noncvx_cut)
-            time_finish_NC = time()
-            println("  Nonconvex baseline x          = ", sol_NC.x)
-            println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)
-            println("  Nonconvex baseline time       = ", time_finish_NC - time_start_NC)
-            # out-of-sample test on the nonconvex-baseline solution
-            _, vals_NC = eval_nominal(recourse, sol_NC.x, sample_test, details=true)
-            append!(NCVX_OBJ,  sol_NC.f + sol_NC.ϕ)
-            append!(NCVX_TIME, time_finish_NC - time_start_NC)
-            append!(NCVX_MEAN, mean(vals_NC) + sol_NC.f)
-            append!(NCVX_STD,  std(vals_NC))
-            vec_quant_NC = quantile(vals_NC .+ sol_NC.f, [0.1, 0.5, 0.9])
-            append!(NCVX_Q10, vec_quant_NC[1])
-            append!(NCVX_MED, vec_quant_NC[2])
-            append!(NCVX_Q90, vec_quant_NC[3])
-            println("  Nonconvex baseline test mean  = ", mean(vals_NC) + sol_NC.f)
-            println("  Nonconvex baseline test std   = ", std(vals_NC))
+            # ---------------------------------------------------------------
+            # Optional: solve the same instance with the nonconvex global
+            # baseline (level bundle with `eval_noncvx_Wass`) at the same
+            # Wasserstein radius and record `NCVX_*`. The inner polynomial
+            # supremum is routed to Gurobi with `NonConvex=2`.
+            if baseline in ("noncvx", "all")
+                println("Solve the same instance with the nonconvex global baseline...")
+                model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
+                set_attribute(model_NC, "OutputFlag", 0)
+                x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= D, base_name="x_NC")
+                w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
+                ϕ_NC = @variable(model_NC, ϕ_NC, base_name="ϕ_NC")
+                main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
+                noncvx_solver = () -> begin
+                    opt = Gurobi.Optimizer(GRB_ENV)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
+                    opt
+                end
+                eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
+                    eval_noncvx_Wass(subproblem, augstate, samples, wassinfo;
+                                     noncvx_solver=noncvx_solver, print=print)
+                time_start_NC = time()
+                sol_NC = solve_main_level(main_NC,
+                                          recourse,
+                                          sample_train,
+                                          wassinfo,
+                                          print=1,
+                                          opt_gap=OPT_GAP,
+                                          max_aux=MAX_AUX,
+                                          min_aux=MIN_AUX,
+                                          min_phi=MIN_PHI,
+                                          cut_evaluator=eval_noncvx_cut)
+                time_finish_NC = time()
+                println("  Nonconvex baseline x          = ", sol_NC.x)
+                println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)
+                println("  Nonconvex baseline time       = ", time_finish_NC - time_start_NC)
+                # out-of-sample test on the nonconvex-baseline solution
+                _, vals_NC = eval_nominal(recourse, sol_NC.x, sample_test, details=true)
+                append!(NCVX_OBJ,  sol_NC.f + sol_NC.ϕ)
+                append!(NCVX_TIME, time_finish_NC - time_start_NC)
+                append!(NCVX_MEAN, mean(vals_NC) + sol_NC.f)
+                append!(NCVX_STD,  std(vals_NC))
+                vec_quant_NC = quantile(vals_NC .+ sol_NC.f, [0.1, 0.5, 0.9])
+                append!(NCVX_Q10, vec_quant_NC[1])
+                append!(NCVX_MED, vec_quant_NC[2])
+                append!(NCVX_Q90, vec_quant_NC[3])
+                println("  Nonconvex baseline test mean  = ", mean(vals_NC) + sol_NC.f)
+                println("  Nonconvex baseline test std   = ", std(vals_NC))
+            end
+            # write the (possibly augmented) result file
+            output = DataFrame(:WASS_DEG   => WASS_DEG,
+                               :WASS_RAD   => WASS_RAD,
+                               :TRAIN_SIZE => TRAIN_SIZE,
+                               :TRAIN_TIME => TRAIN_TIME,
+                               :TRAIN_OBJ  => TRAIN_OBJ,
+                               :TEST_MEAN  => TEST_MEAN,
+                               :TEST_STD   => TEST_STD,
+                               :TEST_Q10   => TEST_Q10,
+                               :TEST_MED   => TEST_MED,
+                               :TEST_Q90   => TEST_Q90)
+            if baseline in ("copos", "all")
+                output.COPS_OBJ  = COPS_OBJ
+                output.COPS_TIME = COPS_TIME
+                output.COPS_MEAN = COPS_MEAN
+                output.COPS_STD  = COPS_STD
+                output.COPS_Q10  = COPS_Q10
+                output.COPS_MED  = COPS_MED
+                output.COPS_Q90  = COPS_Q90
+            end
+            if baseline in ("noncvx", "all")
+                output.NCVX_OBJ  = NCVX_OBJ
+                output.NCVX_TIME = NCVX_TIME
+                output.NCVX_MEAN = NCVX_MEAN
+                output.NCVX_STD  = NCVX_STD
+                output.NCVX_Q10  = NCVX_Q10
+                output.NCVX_MED  = NCVX_MED
+                output.NCVX_Q90  = NCVX_Q90
+            end
+            CSV.write(OUTPUT_FILE, output)
+            println("Update the result in ", OUTPUT_FILE)
+            println("\n\n")
         end
-        # write the (possibly augmented) result file
-        output = DataFrame(:WASS_DEG   => WASS_DEG,
-                           :WASS_RAD   => WASS_RAD,
-                           :TRAIN_TIME => TRAIN_TIME,
-                           :TRAIN_OBJ  => TRAIN_OBJ,
-                           :TEST_MEAN  => TEST_MEAN,
-                           :TEST_STD   => TEST_STD,
-                           :TEST_Q10   => TEST_Q10,
-                           :TEST_MED   => TEST_MED,
-                           :TEST_Q90   => TEST_Q90)
-        if baseline in ("copos", "all")
-            output.COPS_OBJ  = COPS_OBJ
-            output.COPS_TIME = COPS_TIME
-            output.COPS_MEAN = COPS_MEAN
-            output.COPS_STD  = COPS_STD
-            output.COPS_Q10  = COPS_Q10
-            output.COPS_MED  = COPS_MED
-            output.COPS_Q90  = COPS_Q90
-        end
-        if baseline in ("noncvx", "all")
-            output.NCVX_OBJ  = NCVX_OBJ
-            output.NCVX_TIME = NCVX_TIME
-            output.NCVX_MEAN = NCVX_MEAN
-            output.NCVX_STD  = NCVX_STD
-            output.NCVX_Q10  = NCVX_Q10
-            output.NCVX_MED  = NCVX_MED
-            output.NCVX_Q90  = NCVX_Q90
-        end
-        CSV.write(OUTPUT_FILE, output)
-        println("Update the result in ", OUTPUT_FILE)
-        println("\n\n")
     end
 end
 
 # run the experiment
-experiment_allocation(NUM_FACILITY,NUM_SITE,WASS_INFO,baseline="copos")
+experiment_allocation(NUM_FACILITY, NUM_SITE,
+                      WASS_RADII, WASS_ORDER,
+                      TRAIN_SIZES, NUM_TEST;
+                      baseline = BASELINE)

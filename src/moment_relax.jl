@@ -60,6 +60,8 @@ function eval_moment_Wass(
             if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) > val_relax_tol
                 if print > 0
                     println("DEBUG: The loss function evaluation error is ", v̄-v̂)
+                    println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+                    println("DEBUG: the moment relaxation model is\n", model)
                 end
             end
             push!(cuts, [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂])

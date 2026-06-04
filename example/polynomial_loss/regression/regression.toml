@@ -1,0 +1,17 @@
+[experiment]
+"training sample sizes"   = [10]
+"testing sample size"     = 10000
+"target optimality gap"   = 1.0e-2
+"Wasserstein dual min"    = 1.0e-1
+"Wasserstein dual max"    = 1.0e4
+"loss lower bound"        = 0.0
+"baseline method"         = "none"
+"Wasserstein order"       = 4
+"Wasserstein radii"       = [0.0, 1.0e-4, 1.0e-3, 1.0e-2]
+
+[problem]
+"number of variables"     = 3
+"polynomial degree"       = 2
+"noise standard deviation" = 0.1
+"support set"             = "orthant"
+"probability for sparsity" = 0.5

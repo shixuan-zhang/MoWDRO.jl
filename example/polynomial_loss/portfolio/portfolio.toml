@@ -1,0 +1,15 @@
+[experiment]
+"training sample sizes"   = [20]
+"testing sample size"     = 10000
+"target optimality gap"   = 1.0e-2
+"Wasserstein dual min"    = 1.0e-1
+"Wasserstein dual max"    = 1.0e3
+"loss lower bound"        = -1.0e2
+"baseline method"         = "noncvx"
+"Wasserstein order"       = 4
+"Wasserstein radii"       = [0.0, 1.0e-2, 2.0e-2, 5.0e-2, 1.0e-1, 2.0e-1, 5.0e-1, 1.0]
+
+[problem]
+"number of variables"      = 3
+"number of factors"        = 2
+"loss polynomial degree"   = 4
