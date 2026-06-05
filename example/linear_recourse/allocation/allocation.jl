@@ -58,12 +58,13 @@ NUM_DIG          = Int(PROB_CFG["number of digits"])
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
 TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
-NUM_TEST    = Int(EXP_CFG["testing sample size"])
+TEST_SIZE   = Int(EXP_CFG["testing sample size"])
 OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
 MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
 MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
 MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
 BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 # Wasserstein radii from explicit list and/or {start, stop, step} sweeps;
 # rounded to NUM_DIG digits to match the rest of the allocation data.
 WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
@@ -78,11 +79,12 @@ if haskey(EXP_CFG, "Wasserstein sweeps")
 end
 WASS_RADII = round.(WASS_RADII; digits=NUM_DIG)
 
-# OUTPUT_FILE: derived from script name + problem params; allow ARGS[2] override.
+# OUTPUT_FILE: derived from script name + problem params, placed in the
+# directory where `julia` was invoked; allow ARGS[2] override.
 OUTPUT_FILE = if length(ARGS) >= 2
     ARGS[2]
 else
-    joinpath(@__DIR__, "..", "result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv")
+    joinpath(pwd(), "result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv")
 end
 
 # Build the data tuple for the Hanasusanto-Kuhn (2018) copositive baseline
@@ -215,33 +217,34 @@ end
 
 # function that conducts experiments on the facility allocation problem
 function experiment_allocation(
-        n::Int,                  # number of facilities
-        m::Int,                  # number of demand sites
-        wass_radii::Vector{Float64},        # Wasserstein radii to sweep
-        wass_order::Int,                    # shared Wasserstein order (p)
-        N_arr::Vector{Int} = TRAIN_SIZES,   # list of training-sample sizes to sweep
-        M::Int = NUM_TEST;       # number of testing samples
-        D::Float64 = MAX_CAPACITY,     # maximum facility capacity
-        h::Float64 = COST_HOLDING,     # cost for holding inventory
-        s::Float64 = COST_SUBCONTRACT, # cost for subcontracted demand
-        μ::Float64 = MEAN_DEMAND,      # mean factor for the demand
-        σ::Float64 = VAR_DEMAND,       # variance factor for the demand
-        d::Vector{Float64} = zeros(0), # distance vector
-        baseline::String = BASELINE,   # string for baseline methods for comparison:
-                                       #   "none"   — none
-                                       #   "copos"  — Hanasusanto-Kuhn (2018) copositive formulation
-                                       #   "noncvx" — nonconvex global optimization formulation
-                                       #   "all"    — both baselines
+        n::Int,                                     # number of facilities
+        m::Int,                                     # number of demand sites
+        wass_radii::Vector{Float64},                # Wasserstein radii to sweep
+        wass_order::Int,                            # shared Wasserstein order (p)
+        train_sizes::Vector{Int} = TRAIN_SIZES,     # list of training-sample sizes to sweep
+        test_size::Int = TEST_SIZE;                 # number of testing samples
+        D::Float64 = MAX_CAPACITY,                  # maximum facility capacity
+        h::Float64 = COST_HOLDING,                  # cost for holding inventory
+        s::Float64 = COST_SUBCONTRACT,              # cost for subcontracted demand
+        μ::Float64 = MEAN_DEMAND,                   # mean factor for the demand
+        σ::Float64 = VAR_DEMAND,                    # variance factor for the demand
+        d::Vector{Float64} = zeros(0),              # distance vector
+        baseline::String = BASELINE,                # baseline method for comparison:
+                                                    #   "none"   — none
+                                                    #   "copos"  — Hanasusanto-Kuhn (2018) copositive formulation
+                                                    #   "noncvx" — nonconvex global optimization formulation
+                                                    #   "all"    — both baselines
+        radius_scaling::Int = RADIUS_SCALING,       # s in r/(N/N_min)^(1/s); s ≤ 0 disables scaling
     )
     baseline in ("none", "copos", "noncvx", "all") || error(
         "baseline must be one of \"none\", \"copos\", \"noncvx\", \"all\"; got \"$baseline\""
     )
-    isempty(N_arr) && error("training sample sizes array must be non-empty")
+    isempty(train_sizes) && error("training sample sizes array must be non-empty")
     # take the samples of random demands (draw the largest training set once,
     # then later iterations reuse a strict prefix of it)
-    N_max = maximum(N_arr)
+    N_max = maximum(train_sizes)
     sample_train_full = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:N_max]
-    sample_test       = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:M]
+    sample_test       = [round.(μ*exp.(randn(m)*σ),digits=NUM_DIG) for _ in 1:test_size]
     # construct the pairwise indicator matrix
     P = zeros(m*n, m+n)
     for i = 1:n
@@ -272,8 +275,8 @@ function experiment_allocation(
     println("The cost of subcontracted demand is ", s)
     println("The cost of holding inventory is ", h)
     println("The maximum facility capacity is ", D)
-    println("Training sample sizes to sweep: ", N_arr)
-    println("Number of testing samples: ", M)
+    println("Training sample sizes to sweep: ", train_sizes)
+    println("Number of testing samples: ", test_size)
     println("The second-stage cost function is ", [1;x]'*C*[1;y])
     println("The second-stage constraints are ", A*y - b)
     println()
@@ -290,13 +293,13 @@ function experiment_allocation(
     TEST_Q10   = Float64[]
     # copositive-baseline outputs (defined only if baseline ∈ ("copos","all"))
     if baseline in ("copos", "all")
-        COPS_OBJ   = Float64[]
-        COPS_TIME  = Float64[]
-        COPS_MEAN  = Float64[]
-        COPS_STD   = Float64[]
-        COPS_MED   = Float64[]
-        COPS_Q90   = Float64[]
-        COPS_Q10   = Float64[]
+        CPOS_OBJ   = Float64[]
+        CPOS_TIME  = Float64[]
+        CPOS_MEAN  = Float64[]
+        CPOS_STD   = Float64[]
+        CPOS_MED   = Float64[]
+        CPOS_Q90   = Float64[]
+        CPOS_Q10   = Float64[]
     end
     # nonconvex-baseline outputs (defined only if baseline ∈ ("noncvx","all"))
     if baseline in ("noncvx", "all")
@@ -309,10 +312,14 @@ function experiment_allocation(
         NCVX_Q10   = Float64[]
     end
     # loop over all (training-sample size, Wasserstein radius) combinations
-    for N_curr in N_arr
-        sample_train = sample_train_full[1:N_curr]
+    N_min = minimum(train_sizes)
+    for N in train_sizes
+        sample_train = sample_train_full[1:N]
         for r in wass_radii
-            wassinfo = WassInfo(r, wass_order)
+            # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
+            # s = radius_scaling; s ≤ 0 disables scaling.
+            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear/quadratic optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_attribute(model, "OutputFlag", 0)
@@ -334,7 +341,7 @@ function experiment_allocation(
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
-                    ", training size = ", N_curr)
+                    ", training size = ", N)
             println("x = ", sol.x)
             println("f = ", sol.f)
             println("ϕ = ", sol.ϕ)
@@ -348,7 +355,7 @@ function experiment_allocation(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
-            append!(TRAIN_SIZE, N_curr)
+            append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
             append!(TEST_MEAN, mean(vals)+sol.f)
@@ -359,14 +366,14 @@ function experiment_allocation(
             append!(TEST_Q90, vec_quant[3])
             # ---------------------------------------------------------------
             # Optional: solve the same instance with the H-K (2018) copositive
-            # baseline at the same Wasserstein radius and record `COPS_*`.
+            # baseline at the same Wasserstein radius and record `CPOS_*`.
             if baseline in ("copos", "all")
                 # Build paper Eq.(1)+Eq.(3) data for the Hanasusanto-Kuhn (2018)
                 # copositive baseline; see `build_copos_baseline_data` for details.
                 data_HK = build_copos_baseline_data(n, m, d, P, D, s, h)
                 println("Built copositive-baseline data: matrix size = ",
                         m + (4n + 4m + n*m) + 1,
-                        " per sample (", N_curr, " samples).")
+                        " per sample (", N, " samples).")
                 println("Solve the same instance with the Hanasusanto-Kuhn copositive baseline...")
                 time_start_HK = time()
                 res_HK = solve_two_stage_copos(data_HK.c, data_HK.X,
@@ -385,14 +392,14 @@ function experiment_allocation(
                 # out-of-sample test on the H-K solution using the same test samples
                 _, vals_HK = eval_nominal(recourse, res_HK.x, sample_test, details=true)
                 f_HK = 0.0    # allocation main problem has no first-stage cost
-                append!(COPS_OBJ,  res_HK.objective_value)
-                append!(COPS_TIME, time_finish_HK - time_start_HK)
-                append!(COPS_MEAN, mean(vals_HK) + f_HK)
-                append!(COPS_STD,  std(vals_HK))
+                append!(CPOS_OBJ,  res_HK.objective_value)
+                append!(CPOS_TIME, time_finish_HK - time_start_HK)
+                append!(CPOS_MEAN, mean(vals_HK) + f_HK)
+                append!(CPOS_STD,  std(vals_HK))
                 vec_quant_HK = quantile(vals_HK .+ f_HK, [0.1, 0.5, 0.9])
-                append!(COPS_Q10, vec_quant_HK[1])
-                append!(COPS_MED, vec_quant_HK[2])
-                append!(COPS_Q90, vec_quant_HK[3])
+                append!(CPOS_Q10, vec_quant_HK[1])
+                append!(CPOS_MED, vec_quant_HK[2])
+                append!(CPOS_Q90, vec_quant_HK[3])
                 println("  Copositive baseline test mean = ", mean(vals_HK) + f_HK)
                 println("  Copositive baseline test std  = ", std(vals_HK))
             end
@@ -457,13 +464,13 @@ function experiment_allocation(
                                :TEST_MED   => TEST_MED,
                                :TEST_Q90   => TEST_Q90)
             if baseline in ("copos", "all")
-                output.COPS_OBJ  = COPS_OBJ
-                output.COPS_TIME = COPS_TIME
-                output.COPS_MEAN = COPS_MEAN
-                output.COPS_STD  = COPS_STD
-                output.COPS_Q10  = COPS_Q10
-                output.COPS_MED  = COPS_MED
-                output.COPS_Q90  = COPS_Q90
+                output.CPOS_OBJ  = CPOS_OBJ
+                output.CPOS_TIME = CPOS_TIME
+                output.CPOS_MEAN = CPOS_MEAN
+                output.CPOS_STD  = CPOS_STD
+                output.CPOS_Q10  = CPOS_Q10
+                output.CPOS_MED  = CPOS_MED
+                output.CPOS_Q90  = CPOS_Q90
             end
             if baseline in ("noncvx", "all")
                 output.NCVX_OBJ  = NCVX_OBJ
@@ -484,5 +491,6 @@ end
 # run the experiment
 experiment_allocation(NUM_FACILITY, NUM_SITE,
                       WASS_RADII, WASS_ORDER,
-                      TRAIN_SIZES, NUM_TEST;
-                      baseline = BASELINE)
+                      TRAIN_SIZES, TEST_SIZE;
+                      baseline       = BASELINE,
+                      radius_scaling = RADIUS_SCALING)

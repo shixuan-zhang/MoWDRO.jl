@@ -31,12 +31,13 @@ CONFIG = TOML.parsefile(CONFIG_PATH)
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
 TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
-NUM_TEST    = Int(EXP_CFG["testing sample size"])
+TEST_SIZE   = Int(EXP_CFG["testing sample size"])
 OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
 MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
 MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
 MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
 BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 # Wasserstein radii from explicit list and/or {start, stop, step} sweeps.
 WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
 WASS_RADII = Float64[]
@@ -55,32 +56,34 @@ NUM_VAR  = Int(PROB_CFG["number of variables"])
 NUM_FAC  = Int(PROB_CFG["number of factors"])
 DEG_LOSS = Int(PROB_CFG["loss polynomial degree"])
 
-# OUTPUT_FILE: derived from script name + problem params; allow ARGS[2] override.
+# OUTPUT_FILE: derived from script name + problem params, placed in the
+# directory where `julia` was invoked; allow ARGS[2] override.
 OUTPUT_FILE = if length(ARGS) >= 2
     ARGS[2]
 else
-    joinpath(@__DIR__, "..", "result_portfolio_$(NUM_VAR)_$(NUM_FAC).csv")
+    joinpath(pwd(), "result_portfolio_$(NUM_VAR)_$(NUM_FAC).csv")
 end
 
 
 # function that conducts the experiment on the portfolio examples
 function experiment_portfolio(
-        n::Int,                  # number of decisions
-        m::Int,                  # number of factors
-        k::Int,                  # degree of the loss function
-        wass_radii::Vector{Float64},        # Wasserstein radii to sweep
-        wass_order::Int,                    # shared Wasserstein order (p)
-        N_arr::Vector{Int} = TRAIN_SIZES,   # list of training-sample sizes to sweep
-        M::Int = NUM_TEST;       # number of testing samples
-        C::Vector{Float64} = zeros(0),
-        D::Matrix{Float64} = zeros(0,0),
-        f_x::Vector{Float64} = zeros(0),
-        baseline::String = BASELINE,
+        n::Int,                                     # number of decisions
+        m::Int,                                     # number of factors
+        k::Int,                                     # degree of the loss function
+        wass_radii::Vector{Float64},                # Wasserstein radii to sweep
+        wass_order::Int,                            # shared Wasserstein order (p)
+        train_sizes::Vector{Int} = TRAIN_SIZES,     # list of training-sample sizes to sweep
+        test_size::Int = TEST_SIZE;                 # number of testing samples
+        C::Vector{Float64} = zeros(0),              # loss polynomial coefficients
+        D::Matrix{Float64} = zeros(0,0),            # factor-model dependence matrix
+        f_x::Vector{Float64} = zeros(0),            # linear-cost coefficients
+        baseline::String = BASELINE,                # baseline method to compare against
+        radius_scaling::Int = RADIUS_SCALING,       # s in r/(N/N_min)^(1/s); s ≤ 0 disables scaling
     )
     baseline in ("none", "noncvx") || error(
         "baseline must be one of \"none\", \"noncvx\"; got \"$baseline\""
     )
-    isempty(N_arr) && error("training sample sizes array must be non-empty")
+    isempty(train_sizes) && error("training sample sizes array must be non-empty")
     # Sample Φ''(t) = p₁(t)² + p₂(t)² with p₁, p₂ random polynomials of
     # degree ≤ ⌊(k-2)/2⌋, then integrate twice to obtain C₂,…,Cₖ. By
     # Hilbert's theorem two squares already span every univariate
@@ -113,9 +116,9 @@ function experiment_portfolio(
     end
     # take the samples of the uncertainty (draw the largest training set once,
     # then later iterations reuse a strict prefix of it)
-    N_max = maximum(N_arr)
+    N_max = maximum(train_sizes)
     sample_train_full = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:N_max])
-    sample_test       = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:M])
+    sample_test       = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:test_size])
     # randomly generate the linear objective function if not supplied
     if length(f_x) != n
         f_x = rand(n)
@@ -132,8 +135,8 @@ function experiment_portfolio(
     println("Start the experiment on the portfolio management problem...")
     println("The number of decisions is ", n)
     println("The number of factors is ", m)
-    println("Training sample sizes to sweep: ", N_arr)
-    println("Number of testing samples: ", M)
+    println("Training sample sizes to sweep: ", train_sizes)
+    println("Number of testing samples: ", test_size)
     println("The loss function is ", F)
     println("The static cost function is ", f_x'*x)
     println()
@@ -159,10 +162,14 @@ function experiment_portfolio(
         NCVX_Q10   = Float64[]
     end
     # loop over all (training-sample size, Wasserstein radius) combinations
-    for N_curr in N_arr
-        sample_train = sample_train_full[1:N_curr]
+    N_min = minimum(train_sizes)
+    for N in train_sizes
+        sample_train = sample_train_full[1:N]
         for r in wass_radii
-            wassinfo = WassInfo(r, wass_order)
+            # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
+            # s = radius_scaling; s ≤ 0 disables scaling.
+            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_attribute(model, "OutputFlag", 0)
@@ -186,7 +193,7 @@ function experiment_portfolio(
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
-                    ", training size = ", N_curr)
+                    ", training size = ", N)
             println("x = ", sol.x)
             println("f = ", sol.f)
             println("ϕ = ", sol.ϕ)
@@ -200,7 +207,7 @@ function experiment_portfolio(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
-            append!(TRAIN_SIZE, N_curr)
+            append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
             append!(TEST_MEAN, mean(vals)+sol.f)
@@ -287,5 +294,6 @@ end
 # run the experiment
 experiment_portfolio(NUM_VAR, NUM_FAC, DEG_LOSS,
                      WASS_RADII, WASS_ORDER,
-                     TRAIN_SIZES, NUM_TEST;
-                     baseline = BASELINE)
+                     TRAIN_SIZES, TEST_SIZE;
+                     baseline       = BASELINE,
+                     radius_scaling = RADIUS_SCALING)

@@ -37,12 +37,13 @@ CONFIG = TOML.parsefile(CONFIG_PATH)
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
 TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
-NUM_TEST    = Int(EXP_CFG["testing sample size"])
+TEST_SIZE   = Int(EXP_CFG["testing sample size"])
 OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
 MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
 MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
 MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
 BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 # Wasserstein radii from explicit list and/or {start, stop, step} sweeps.
 WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
 WASS_RADII = Float64[]
@@ -63,11 +64,12 @@ NOISE_SIGMA = Float64(PROB_CFG["noise standard deviation"])
 SUPPORT_SET = String(PROB_CFG["support set"])
 SPARSE_PROB = Float64(PROB_CFG["probability for sparsity"])
 
-# OUTPUT_FILE: derived from script name + problem params; allow ARGS[2] override.
+# OUTPUT_FILE: derived from script name + problem params, placed in the
+# directory where `julia` was invoked; allow ARGS[2] override.
 OUTPUT_FILE = if length(ARGS) >= 2
     ARGS[2]
 else
-    joinpath(@__DIR__, "..", "result_regression_$(NUM_VAR)_$(DEG_POLY).csv")
+    joinpath(pwd(), "result_regression_$(NUM_VAR)_$(DEG_POLY).csv")
 end
 
 # helper function to generate multiindices of n variables up to degree d
@@ -90,25 +92,31 @@ end
 
 # function that conducts experiments on the polynomial regression examples
 function experiment_regression(
-        m::Int,                  # regressor dimension
-        d::Int,                  # polynomial degree
-        σ::Float64,              # noise std
-        Σ::Matrix{Float64},      # covariance of sample generation
-        wass_radii::Vector{Float64},        # Wasserstein radii to sweep
-        wass_order::Int,                    # shared Wasserstein order (p)
-        N_arr::Vector{Int} = TRAIN_SIZES,   # list of training-sample sizes to sweep
-        M::Int = NUM_TEST;       # number of testing samples
-        support_set::String = SUPPORT_SET,
-        sparse_prob::Float64 = SPARSE_PROB,
-        baseline::String = BASELINE,
+        m::Int,                                     # regressor dimension
+        d::Int,                                     # polynomial degree
+        σ::Float64,                                 # noise standard deviation
+        wass_radii::Vector{Float64},                # Wasserstein radii to sweep
+        wass_order::Int,                            # shared Wasserstein order (p)
+        train_sizes::Vector{Int} = TRAIN_SIZES,     # list of training-sample sizes to sweep
+        test_size::Int = TEST_SIZE;                 # number of testing samples
+        Σ::Matrix{Float64} = zeros(0,0),            # covariance of sample generation
+        support_set::String = SUPPORT_SET,          # support set Z; see options below
+        sparse_prob::Float64 = SPARSE_PROB,         # probability of zeroing a ground-truth coefficient
+        baseline::String = BASELINE,                # baseline method to compare against
+        radius_scaling::Int = RADIUS_SCALING,       # s in r/(N/N_min)^(1/s); s ≤ 0 disables scaling
     )
     baseline in ("none", "noncvx") || error(
         "baseline must be one of \"none\", \"noncvx\"; got \"$baseline\""
     )
-    support_set in ("fullspace", "orthant", "box") || error(
-        "support set must be one of \"fullspace\", \"orthant\", \"box\"; got \"$support_set\""
+    support_set in ("full-space", "orthant", "box") || error(
+        "support set must be one of \"full-space\", \"orthant\", \"box\"; got \"$support_set\""
     )
-    isempty(N_arr) && error("training sample sizes array must be non-empty")
+    isempty(train_sizes) && error("training sample sizes array must be non-empty")
+    # randomly generate a covariance matrix if not supplied
+    if size(Σ) != (m,m)
+        L_Σ = rand(m,m)
+        Σ = L_Σ'*L_Σ
+    end
     # randomly generate the ground truth polynomial
     @polyvar z[1:m]
     truth = 0
@@ -118,7 +126,7 @@ function experiment_regression(
     end
     # take the samples of the uncertainty (draw the largest training set once,
     # then later iterations reuse a strict prefix of it)
-    transform_sample = if support_set == "fullspace"
+    transform_sample = if support_set == "full-space"
         z->z
     elseif support_set == "orthant"
         z->abs.(z)
@@ -126,9 +134,9 @@ function experiment_regression(
         z->(z.^2)./(1+z.^2)
     end
     augment_sample = z -> [transform_sample(z); truth(transform_sample(z))+randn()*σ]
-    N_max = maximum(N_arr)
+    N_max = maximum(train_sizes)
     sample_train_full = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:N_max])
-    sample_test       = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:M])
+    sample_test       = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:test_size])
     # define the loss function
     n = length(A)
     @polyvar x[1:n] ξ[1:(m+1)] # ξ = (z,v)
@@ -146,10 +154,12 @@ function experiment_regression(
     println("Start the experiment on the polynomial regression problem...")
     println("The number of regression parameters is ", n)
     println("The number of regressors is ", m)
-    println("Training sample sizes to sweep: ", N_arr)
-    println("Number of testing samples: ", M)
+    println("Training sample sizes to sweep: ", train_sizes)
+    println("Number of testing samples: ", test_size)
     println("The loss function is ", F)
     println("The ground truth is ", truth)
+    println("The noise std is ", σ)
+    println("The sample covariance matrix is\n", Σ)
     println()
     # prepare the table for output
     WASS_RAD   = Float64[]
@@ -173,10 +183,14 @@ function experiment_regression(
         NCVX_Q10   = Float64[]
     end
     # loop over all (training-sample size, Wasserstein radius) combinations
-    for N_curr in N_arr
-        sample_train = sample_train_full[1:N_curr]
+    N_min = minimum(train_sizes)
+    for N in train_sizes
+        sample_train = sample_train_full[1:N]
         for r in wass_radii
-            wassinfo = WassInfo(r, wass_order)
+            # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
+            # s = radius_scaling; s ≤ 0 disables scaling.
+            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_attribute(model, "OutputFlag", 0)
@@ -198,7 +212,7 @@ function experiment_regression(
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
-                    ", training size = ", N_curr)
+                    ", training size = ", N)
             println("x = ", sol.x)
             println("f = ", sol.f)
             println("ϕ = ", sol.ϕ)
@@ -212,7 +226,7 @@ function experiment_regression(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
-            append!(TRAIN_SIZE, N_curr)
+            append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
             append!(TEST_MEAN, mean(vals)+sol.f)
@@ -295,10 +309,9 @@ function experiment_regression(
 end
 
 # run the experiment
-C = rand(NUM_VAR,NUM_VAR)
-experiment_regression(NUM_VAR, DEG_POLY, NOISE_SIGMA, C'*C,
-                      WASS_RADII, WASS_ORDER,
-                      TRAIN_SIZES, NUM_TEST;
-                      support_set = SUPPORT_SET,
-                      sparse_prob = SPARSE_PROB,
-                      baseline    = BASELINE)
+experiment_regression(NUM_VAR, DEG_POLY, NOISE_SIGMA,
+                      WASS_RADII, WASS_ORDER, TRAIN_SIZES, TEST_SIZE;
+                      support_set    = SUPPORT_SET,
+                      sparse_prob    = SPARSE_PROB,
+                      baseline       = BASELINE,
+                      radius_scaling = RADIUS_SCALING)

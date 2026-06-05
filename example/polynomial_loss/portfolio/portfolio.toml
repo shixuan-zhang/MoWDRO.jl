@@ -6,6 +6,7 @@
 "Wasserstein dual max"    = 1.0e3
 "loss lower bound"        = -1.0e2
 "baseline method"         = "noncvx"
+"radius scaling"          = 0
 "Wasserstein order"       = 4
 "Wasserstein radii"       = [0.0, 1.0e-2, 2.0e-2, 5.0e-2, 1.0e-1, 2.0e-1, 5.0e-1, 1.0]
 
