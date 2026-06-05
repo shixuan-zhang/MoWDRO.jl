@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 CSDP = "0a46da34-8e4b-519e-b418-48813639ff34"
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 DynamicPolynomials = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
 ECOS = "e2685f51-7e38-5353-a97d-a921fd2c8199"
 Format = "1fa38f19-a742-5d3f-a2b9-30dd87b9d5f8"

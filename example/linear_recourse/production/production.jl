@@ -22,6 +22,8 @@
 #          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
 
 
+using Distributed
+# load modules on the main process
 using JuMP
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
@@ -31,6 +33,23 @@ using Gurobi, Mosek, MosekTools
 const GRB_ENV = Gurobi.Env()
 include("../../../src/MoWDRO.jl")
 using .MoWDRO
+# load modules on the worker processes
+let src_path = joinpath(@__DIR__, "..", "..", "..", "src", "MoWDRO.jl")
+    setup_expr = quote
+        using JuMP
+        using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
+        using Gurobi, Mosek, MosekTools
+        const GRB_ENV = Gurobi.Env()
+        include($src_path)
+        using .MoWDRO
+    end
+    for w in workers()
+        w == myid() && continue
+        remotecall_wait(w) do
+            Base.eval(Main, setup_expr)
+        end
+    end
+end
 
 # Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
 # TOML with the same base name as the script.

@@ -12,6 +12,8 @@
 # and v = g(z) + ϵ for some randomly generated polynomial g of degree d,
 # and ϵ is a Gaussian noise with mean 0 and variance σ².
 
+using Distributed
+# load modules on the main process
 using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
@@ -19,6 +21,23 @@ using Gurobi, Mosek, MosekTools
 const GRB_ENV = Gurobi.Env()
 include("../../../src/MoWDRO.jl")
 using .MoWDRO
+# load modules on the worker processes
+let src_path = joinpath(@__DIR__, "..", "..", "..", "src", "MoWDRO.jl")
+    setup_expr = quote
+        using JuMP
+        using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
+        using Gurobi, Mosek, MosekTools
+        const GRB_ENV = Gurobi.Env()
+        include($src_path)
+        using .MoWDRO
+    end
+    for w in workers()
+        w == myid() && continue
+        remotecall_wait(w) do
+            Base.eval(Main, setup_expr)
+        end
+    end
+end
 
 # Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
 # TOML with the same base name as the script.
