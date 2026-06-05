@@ -18,18 +18,16 @@ using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
 using Gurobi, Mosek, MosekTools
+using MoWDRO
 const GRB_ENV = Gurobi.Env()
-include("../../../src/MoWDRO.jl")
-using .MoWDRO
 # load modules on the worker processes
-let src_path = joinpath(@__DIR__, "..", "..", "..", "src", "MoWDRO.jl")
+let
     setup_expr = quote
         using JuMP
         using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
         using Gurobi, Mosek, MosekTools
+        using MoWDRO
         const GRB_ENV = Gurobi.Env()
-        include($src_path)
-        using .MoWDRO
     end
     for w in workers()
         w == myid() && continue

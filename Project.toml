@@ -32,3 +32,9 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
+
+# Sub-projects sharing this Manifest. Activate the example environment with
+# `julia --project=example` to pick up CSV / DataFrames / TOML / Statistics
+# alongside MoWDRO and any user-installed commercial solvers.
+[workspace]
+projects = ["example"]
