@@ -1,8 +1,6 @@
-name = "MoWDROExamples"
-uuid = "f1d2b86b-2d4a-4f4e-9f7e-3a4f0c1d0f30"
-version = "0.1.0"
-
-# Non-core dependencies used only by the experiment drivers under example/.
+# Environment-only sub-project of the workspace at the parent directory.
+# Activate with `julia --project=example`. Non-core dependencies used by the
+# experiment drivers under example/ live here.
 # Commercial solvers (Gurobi / Mosek / MosekTools) are intentionally omitted
 # and must be installed into this environment separately by the user.
 [deps]
