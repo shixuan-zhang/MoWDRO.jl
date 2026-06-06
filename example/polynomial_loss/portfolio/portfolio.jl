@@ -303,6 +303,10 @@ function experiment_portfolio(
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
             println("\n\n")
+            # ensure per-iteration logs reach the terminal in real time —
+            # Distributed workers leave the main process with a block-
+            # buffered stdout when output is piped or redirected.
+            flush(stdout)
         end
     end
 end

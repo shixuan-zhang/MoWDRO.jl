@@ -148,7 +148,7 @@ function experiment_regression(
     elseif support_set == "orthant"
         z->abs.(z)
     elseif support_set == "box"
-        z->(z.^2)./(1+z.^2)
+        z->(z.^2)./(1 .+ z.^2)
     end
     augment_sample = z -> [transform_sample(z); truth(transform_sample(z))+randn()*σ]
     N_max = maximum(train_sizes)
@@ -267,6 +267,8 @@ function experiment_regression(
                 noncvx_solver = () -> begin
                     opt = Gurobi.Optimizer(GRB_ENV)
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("MIPGap"), 5e-2)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), 1e-2)
                     opt
                 end
                 eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
@@ -321,6 +323,10 @@ function experiment_regression(
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
             println("\n\n")
+            # ensure per-iteration logs reach the terminal in real time —
+            # Distributed workers leave the main process with a block-
+            # buffered stdout when output is piped or redirected.
+            flush(stdout)
         end
     end
 end

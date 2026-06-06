@@ -1,0 +1,18 @@
+[experiment]
+"training sample sizes"   = [5]
+"testing sample size"     = 1000
+"target optimality gap"   = 1.0e-1
+"Wasserstein dual min"    = 1.0e-1
+"Wasserstein dual max"    = 1.0e4
+"loss lower bound"        = 0.0
+"baseline method"         = "noncvx"
+"radius scaling"          = 0
+"Wasserstein order"       = 4
+"Wasserstein radii"       = [0.0, 1.0e-3, 1.0e-2, 1.0e-1]
+
+[problem]
+"number of variables"      = 3
+"polynomial degree"        = 2
+"noise standard deviation" = 0.1
+"support set"              = "box" # options: "full-space", "orthant", or "box"
+"probability for sparsity" = 0.8
