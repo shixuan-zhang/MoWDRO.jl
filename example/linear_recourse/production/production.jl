@@ -1,11 +1,11 @@
 # numerical example for a two-stage production problem
 # (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,D]ⁿ, where fₓ ∈ [0,1]ⁿ, and
-# F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
+# F(x,ξ) := min  -∑ᵢ ρᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
 #           s.t. wⱼ - uⱼ = tⱼ(ξ)⋅xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j = 1,…,n,
 #                0 ≤ zᵢ ≤ qᵢ(ξ),                 ∀ i = 1,…,m,
 #                wⱼ, uⱼ ≥ 0,                     ∀ j = 1,…,n.
-# Here, rᵢ > 0 is the product price,
+# Here, ρᵢ > 0 is the product price,
 # gⱼ is the late price for ingredient purchasing,
 # pᵢⱼ is the percentage of ingredient j in product i,
 # sᵢ(ξ) ∼ Uniform(0,1) is the random salvage price
@@ -19,15 +19,14 @@
 # By linear duality, we can write F alternatively as
 # F(x,ξ) = max  -(t(ξ)⋅xᵀ, q(ξ)ᵀ)⋅y
 #               = (1,x)ᵀ⋅[0 0 -q(ξ)ᵀ; 0 -diag(t(ξ)) 0]⋅(1,y)
-#          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
+#          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; ρ; -ρ; 0]
 
 
 using Distributed
 # load modules on the main process
-using JuMP
+using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
-using TOML
 # use commercial solvers for efficiency and numerical stability
 using Gurobi, Mosek, MosekTools
 using MoWDRO
@@ -117,7 +116,7 @@ end
 # positional arguments expected by `solve_two_stage_copos`.
 function build_copos_baseline_data(
         n::Int, m::Int,
-        r::Vector{Float64}, s::Vector{Float64}, t::Vector{Int},
+        ρ::Vector{Float64}, s::Vector{Float64}, t::Vector{Int},
         g::Vector{Float64}, d::Vector{Float64}, P::Matrix{Float64},
         D::Float64, f_x::Vector{Float64},
     )
@@ -135,12 +134,12 @@ function build_copos_baseline_data(
     K_HK   = m + n                      # dim(ξ)
     Mh_HK  = 4n + 2m                    # row dim of W before support extension
     # Cost vector  Q ξ + q  on y = (z; w; u):
-    #   z-block (length m):  -r              (constant)
+    #   z-block (length m):  -ρ              (constant)
     #   w-block (length n):  -s(ξ)           (nonperishable: -s_j ξ_{m+j};  perishable: -s_j)
     #   u-block (length n):  +g              (constant)
     Q_HK = zeros(N_y_HK, K_HK)
     q_HK = zeros(N_y_HK)
-    for i = 1:m;  q_HK[i]            = -r[i];  end                # z block
+    for i = 1:m;  q_HK[i]            = -ρ[i];  end                # z block
     for j = 1:n
         if t[j] == 1                                              # nonperishable
             Q_HK[m + j, m + j] = -s[j]
@@ -225,7 +224,7 @@ function experiment_production(
         D::Float64 = STORAGE_MAX,                   # maximum ingredient storage capacity
         f_x::Vector{Float64} = zeros(0),            # vector of ingredient costs
         P::Matrix{Float64} = zeros(0,0),            # matrix of production coefficients
-        r::Vector{Float64} = zeros(0),              # vector of regular product prices
+        ρ::Vector{Float64} = zeros(0),              # vector of regular product prices
         d::Vector{Float64} = zeros(0),              # vector of standard demands
         σ::Vector{Float64} = zeros(0),              # vector of demand logarithmic variances
         g::Vector{Float64} = zeros(0),              # vector of late ingredient costs
@@ -255,10 +254,10 @@ function experiment_production(
         end
     end
     # check if the product prices are supplied
-    if length(r) != m
-        r = zeros(m)
+    if length(ρ) != m
+        ρ = zeros(m)
         for j = 1:m
-            r[j] = round(PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIG)
+            ρ[j] = round(PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIG)
         end
     end
     # check if the standard demands are supplied
@@ -314,19 +313,19 @@ function experiment_production(
     # define the two-stage linear recourse function,
     C = [zeros(n+1)' -(d.*ξ[1:m])'; zeros(n) -Diagonal(C_t) zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [b_s; -g; r; -r; zeros(m)]
+    b = [b_s; -g; ρ; -ρ; zeros(m)]
     Ξ = basicsemialgebraicset(FullSpace(),
                               [[ξ[i] for i in 1:m+n];
                                [1-ξ[i] for i in m+1:m+n];
                                [ξ[i]*(1-ξ[i]) for i in m+1:m+n]
                               ])
-    B = [g; r]
+    B = [g; ρ]
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
     # print the problem information
     println("Start the experiment on the two-stage production problem...")
     println("The number of ingredients is ", n)
     println("The number of products is ", m)
-    println("The product prices are ", r)
+    println("The product prices are ", ρ)
     println("The ingredient prices are ", f_x)
     println("The ingredient maximum salvage prices are ", s)
     println("The late ingredient prices are ", g)
@@ -426,7 +425,7 @@ function experiment_production(
             if baseline in ("copos", "all")
                 # Build paper Eq.(1)+Eq.(3) data for the Hanasusanto-Kuhn (2018)
                 # copositive baseline; see `build_copos_baseline_data` for details.
-                data_HK = build_copos_baseline_data(n, m, r, s, t, g, d, P, D, f_x)
+                data_HK = build_copos_baseline_data(n, m, ρ, s, t, g, d, P, D, f_x)
                 println("Built copositive-baseline data: matrix size = ",
                         (m + n) + (4n + 2m + n) + 1,
                         " per sample (", N, " samples).")
@@ -439,7 +438,7 @@ function experiment_production(
                                                sample_train, wassinfo.r;
                                                solver = Mosek.Optimizer,
                                                silent = true,
-                                               δ = 0.1)
+                                               δ = 0.0)
                 time_finish_HK = time()
                 println("  Copositive baseline status    = ", res_HK.status)
                 println("  Copositive baseline x         = ", res_HK.x)
