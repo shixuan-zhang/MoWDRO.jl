@@ -76,7 +76,7 @@ end
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
 NUM_VAR     = Int(PROB_CFG["number of variables"])
-DEG_POLY    = Int(PROB_CFG["polynomial degree"])
+DEG_POLY    = Int(PROB_CFG["truth polynomial degree"])
 NOISE_SIGMA = Float64(PROB_CFG["noise standard deviation"])
 SUPPORT_SET = String(PROB_CFG["support set"])
 SPARSE_PROB = Float64(PROB_CFG["probability for sparsity"])

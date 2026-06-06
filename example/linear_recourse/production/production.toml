@@ -1,14 +1,14 @@
 [experiment]
-"training sample sizes"   = [10]
+"training sample sizes"   = [10,20,30,40,50,60,70,80,90,100]
 "testing sample size"     = 10000
 "target optimality gap"   = 1.0e-2
 "Wasserstein dual min"    = 1.0e-1
 "Wasserstein dual max"    = 1.0e3
 "loss lower bound"        = -1.0e2
-"baseline method"         = "all"
-"radius scaling"          = 0
+"baseline method"         = "copos"
+"radius scaling"          = 10
 "Wasserstein order"       = 2
-"Wasserstein radii"       = [0.1, 0.2]
+"Wasserstein radii"       = [0.0, 1.0e-2, 1.0e-1]
 
 [problem]
 "number of parts"         = 5

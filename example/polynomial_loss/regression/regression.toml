@@ -1,18 +1,18 @@
 [experiment]
-"training sample sizes"   = [10,20,30,40,50,60,70,80,90,100]
+"training sample sizes"   = [10,20,30,40,50,60,70,80,90,100,120,140,160,180,200]
 "testing sample size"     = 10000
-"target optimality gap"   = 1.0e-2
+"target optimality gap"   = 1.0e-3
 "Wasserstein dual min"    = 1.0e-1
 "Wasserstein dual max"    = 1.0e4
 "loss lower bound"        = 0.0
 "baseline method"         = "none"
 "radius scaling"          = 5
 "Wasserstein order"       = 4
-"Wasserstein radii"       = [0.0, 1.0e-3, 1.0e-2, 1.0e-1]
+"Wasserstein radii"       = [0.0, 1.0e-3, 1.0e-2, 1.0e-1, 1.0]
 
 [problem]
 "number of variables"      = 5
-"polynomial degree"        = 2
+"truth polynomial degree"  = 2
 "noise standard deviation" = 0.1
 "support set"              = "orthant" # options: "full-space", "orthant", or "box"
 "probability for sparsity" = 0.5
