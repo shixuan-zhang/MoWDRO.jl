@@ -154,10 +154,10 @@ function experiment_regression(
     N_max = maximum(train_sizes)
     sample_train_full = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:N_max])
     sample_test       = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:test_size])
-    # define the loss function
+    # define the loss function (scaled with n for numerical stability)
     n = length(A)
     @polyvar x[1:n] ξ[1:(m+1)] # ξ = (z,v)
-    F = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2
+    F = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2 / n 
     ∇ₓF = differentiate(F,x)
     Ξ = basicsemialgebraicset(FullSpace(), if support_set == "orthant"
                                     [ξ[i] + 0.0 for i in 1:m]

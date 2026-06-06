@@ -18,6 +18,7 @@ function bisection_feas_cut(
         max_aux::Float64 = VAL_INF,
         min_aux::Float64 = 0.0,
         feas_tol::Float64 = -1.0,
+        flag_safe::Bool = false,
         print::Int = 0
     ) where T <: SampleSubproblem
     # set the tolerance if not supplied
@@ -43,8 +44,12 @@ function bisection_feas_cut(
         w_temp = (w_lb + w_ub) / 2
         cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print)
     end
+    if flag_safe
+        w_best += feas_tol
+        cut_best = eval_cut(subproblem, [sol_x;w_best], samples, wassinfo, print=print)
+    end
     if isnothing(cut_best)
-        error("The moment relaxation is infeasible or unbounded.")
+        error("The moment relaxation is infeasible or unbounded for any Wasserstein dual.")
     end
     if print > 0
         println("  Adjusting Wasserstein auxiliary variable from ", sol_w, " to ", w_best, " for cut generation.")
@@ -99,10 +104,15 @@ function solve_main_level(
     sol_u = round.(value.(main.u),digits=NUM_DIG)
     min_obj = objective_value(main.model)
     val_f = round(main.f_x'*sol_x + main.f_u'*sol_u,digits=NUM_DIG)
-    # retrieve the Wasserstein auxiliary variable if present
+    # retrieve the Wasserstein dual variable if present
     sol_w = 0.0
     if flag_Wass
         sol_w = round(value(main.w),digits=NUM_DIG)
+    end
+    # print the starting message
+    if print > 0
+        println(" Start the level bundle method for the main problem...")
+        println(" The initial Wasserstein dual variable = ", sol_w)
     end
     # get the initial upper bound
     cut = zeros(dim_x+2)
@@ -124,9 +134,8 @@ function solve_main_level(
     opt_u = sol_u
     opt_f = val_f
     opt_ϕ = val_ϕ
-    # print the starting message
+    # print the initial bounds
     if print > 0
-        println(" Start the level bundle method for the main problem...")
         println(" The initial lower bound = ", min_obj)
         println(" The initial upper bound = ", max_obj)
     end
@@ -222,6 +231,7 @@ function solve_main_level(
         end
     end
     if max_obj - min_obj < -opt_gap
+        println("DEBUG: the last added cut is\n", cut)
         error("Invalid upper or lower bound in the level method!")
     end
     if print > 0
