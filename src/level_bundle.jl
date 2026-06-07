@@ -30,7 +30,7 @@ function bisection_feas_cut(
     w_ub = max_aux
     w_temp = (w_lb + w_ub) / 2
     w_best = w_temp
-    cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print)
+    cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print-1)
     cut_best = cut_temp
     # bisection in w
     while w_ub - w_lb > feas_tol
@@ -42,16 +42,16 @@ function bisection_feas_cut(
             w_ub = w_temp
         end
         w_temp = (w_lb + w_ub) / 2
-        cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print)
+        cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print-1)
     end
     if flag_safe
         w_best += feas_tol
-        cut_best = eval_cut(subproblem, [sol_x;w_best], samples, wassinfo, print=print)
+        cut_best = eval_cut(subproblem, [sol_x;w_best], samples, wassinfo, print=print-1)
     end
     if isnothing(cut_best)
         error("The moment relaxation is infeasible or unbounded for any Wasserstein dual.")
     end
-    if print > 0
+    if print >= 0
         println("  Adjusting Wasserstein auxiliary variable from ", sol_w, " to ", w_best, " for cut generation.")
     end
     return cut_best, w_best
@@ -110,7 +110,7 @@ function solve_main_level(
         sol_w = round(value(main.w),digits=NUM_DIG)
     end
     # print the starting message
-    if print > 0
+    if print >= 0
         println(" Start the level bundle method for the main problem...")
         println(" The initial Wasserstein dual variable = ", sol_w)
     end
@@ -120,7 +120,7 @@ function solve_main_level(
         cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
         if isnothing(cut) # the moment relaxation is unbounded/infeasible
             cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut, 
-                                            max_aux=max_aux, min_aux=min_aux, print=print-1)
+                                            max_aux=max_aux, min_aux=min_aux, print=print)
         end
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
@@ -135,7 +135,7 @@ function solve_main_level(
     opt_f = val_f
     opt_ϕ = val_ϕ
     # print the initial bounds
-    if print > 0
+    if print >= 0
         println(" The initial lower bound = ", min_obj)
         println(" The initial upper bound = ", max_obj)
     end
@@ -147,18 +147,20 @@ function solve_main_level(
         # get an updated lower bound
         optimize!(main.model)
         if termination_status(main.model) != OPTIMAL && !has_values(main.model)
-            println("DEBUG: the level bounding step runs into issues...\n", 
-                    solution_summary(main.model,verbose=true))
-            println("DEBUG: the current level bounding step problem x = ", sol_x)
-            if flag_Wass
-                println("DEBUG: the current level bounding step problem w = ", sol_w)
+            if print >= 0
+                println("DEBUG: the level bounding step runs into issues...\n", 
+                        solution_summary(main.model,verbose=true))
+                println("DEBUG: the current level bounding step problem x = ", sol_x)
+                if flag_Wass
+                    println("DEBUG: the current level bounding step problem w = ", sol_w)
+                end
+                println("DEBUG: the current level bounding step model is \n", main.model)
             end
-            println("DEBUG: the current level bounding step model is \n", main.model)
             error("The level method bounding step has failed with status: ", termination_status(main.model))
         end
         min_obj = objective_value(main.model)
         if (max_obj - min_obj) / max(1, abs(min_obj)) <= opt_gap
-            if print > 0
+            if print >= 0
                 printfmtln(" The level method has converged with the updated lower bound {}.", min_obj)
             end
             break
@@ -175,13 +177,15 @@ function solve_main_level(
         # find the next iterate
         optimize!(main.model)
         if termination_status(main.model) != OPTIMAL && !has_values(main.model)
-            println("DEBUG: the level projection step runs into issues...\n", 
-                    solution_summary(main.model,verbose=true))
-            println("DEBUG: the current level projection step problem x = ", sol_x)
-            if flag_Wass
-                println("DEBUG: the current level projection step problem w = ", sol_w)
+            if print >= 0
+                println("DEBUG: the level projection step runs into issues...\n", 
+                        solution_summary(main.model,verbose=true))
+                println("DEBUG: the current level projection step problem x = ", sol_x)
+                if flag_Wass
+                    println("DEBUG: the current level projection step problem w = ", sol_w)
+                end
+                println("DEBUG: the current level projection step problem model is \n", main.model)
             end
-            println("DEBUG: the current level projection step problem model is \n", main.model)
             error("The level method projection step has failed with status: ", termination_status(main.model))
         end
         sol_x = round.(value.(main.x),digits=NUM_DIG)
@@ -197,7 +201,7 @@ function solve_main_level(
             cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
             if isnothing(cut) # the moment relaxation is unbounded/infeasible
                 cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut,
-                                                max_aux=max_aux, min_aux=min_aux, print=print-1)
+                                                max_aux=max_aux, min_aux=min_aux, print=print)
             end
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
@@ -217,24 +221,29 @@ function solve_main_level(
         delete(main.model, con_proj)
         @objective(main.model, Min, obj)
         # print the update if needed
-        if print > 0
+        if print >= 0
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
                        iter, val_ϕ+val_f, max_obj, min_obj)
+            if print >= 1
+                println("  The current Wasserstein dual variable = ", sol_w)
+            end
         end
         iter += 1
         # check if maximum number of iteration is reached
         if iter > max_iter
-            if print > 0
+            if print >= 0
                 printfmtln(" The level bundle method does not converge within {} iterations", max_iter)
             end
             return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
         end
     end
     if max_obj - min_obj < -opt_gap
-        println("DEBUG: the last added cut is\n", cut)
+        if print >= 0
+            println("DEBUG: the last added cut is\n", cut)
+        end
         error("Invalid upper or lower bound in the level method!")
     end
-    if print > 0
+    if print >= 0
         printfmtln(" The level bundle method has converged within {} iteration(s)", iter)
     end
     return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)

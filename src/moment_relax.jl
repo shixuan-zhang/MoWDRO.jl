@@ -25,7 +25,7 @@ function _gen_moment_cut_polynomial_loss(
     p = sum((loss.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
     # define the SOS optimization model
     model = SOSModel(mom_solver)
-    if print < 1
+    if print <= 1
         set_silent(model)
     end
     @variable(model, optval)
@@ -41,7 +41,7 @@ function _gen_moment_cut_polynomial_loss(
         ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
         return [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂]
     elseif termination_status(model) == SLOW_PROGRESS
-        if print > 0
+        if print >= 0
             println("DEBUG: slow progress reported by the solver...")
         end
         μ̄ = moments(constr)
@@ -51,7 +51,7 @@ function _gen_moment_cut_polynomial_loss(
         v̄ = objective_value(model)
         v̂ = v̂-w̄*p̂
         if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) > val_relax_tol
-            if print > 0
+            if print >= 1
                 println("DEBUG: The loss function evaluation error is ", v̄-v̂)
                 println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
                 println("DEBUG: the moment relaxation model is\n", model)
@@ -59,7 +59,7 @@ function _gen_moment_cut_polynomial_loss(
         end
         return [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂]
     else
-        if print > 0
+        if print >= 1
             println("DEBUG: the moment relaxation degree is ", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
             println("DEBUG: the moment relaxation objective is\n", f-w̄*p)
@@ -157,7 +157,7 @@ function _gen_moment_cut_linear_recourse(
     end
     # define the SOS optimization model
     model = SOSModel(mom_solver)
-    if print < 1
+    if print <= 1
         set_silent(model)
     end
     @variable(model, optval)
@@ -172,7 +172,7 @@ function _gen_moment_cut_linear_recourse(
         p̂ = expectation(μ̄,p)
         return [ĉ;wassinfo.r^wassinfo.p-p̂]
     elseif termination_status(model) == SLOW_PROGRESS
-        if print > 0
+        if print >= 0
             println("DEBUG: slow progress reported by the solver...")
         end
         μ̄ = moments(constr)
@@ -183,13 +183,13 @@ function _gen_moment_cut_linear_recourse(
         v̄ = objective_value(model)
         v̂ = [1;x̄]'*ĉ-w̄*p̂
         if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) > val_relax_tol
-            if print > 0
+            if print >= 1
                 println("DEBUG: The recourse evaluation error is ", v̄-v̂)
             end
         end
         return [ĉ;wassinfo.r^wassinfo.p-p̂]
     else
-        if print > 0
+        if print >= 1
             println("DEBUG: the moment relaxation degree is ", relaxdeg)
             println("DEBUG: the moment relaxation domain is\n", S)
             println("DEBUG: the moment relaxation objective is\n", f)

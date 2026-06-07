@@ -103,7 +103,7 @@ function _gen_noncvx_cut_polynomial_loss(
     # inner solver, so we cannot use `set_silent(model)` after the fact.
     # Instead, set the silent flag on the inner solver *before* wrapping
     # it with `PolyJuMP.QCQP`.
-    inner_factory = if print < 1
+    inner_factory = if print <= 1
         () -> begin
             inner = noncvx_solver()
             MOI.set(inner, MOI.Silent(), true)
@@ -132,10 +132,12 @@ function _gen_noncvx_cut_polynomial_loss(
     # accept proven-optimal as well as merely feasible solutions
     # (a nonconvex global solver may stop at a time / node limit).
     if !is_solved_and_feasible(model, allow_almost=true) && !has_values(model)
-        println("DEBUG: nonconvex polynomial-loss subproblem $i did not solve, status: ",
-                termination_status(model))
-        println("DEBUG: the current main problem solution is\n", x̄)
-        println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+        if print >= 0
+            println("DEBUG: nonconvex polynomial-loss subproblem $i did not solve, status: ",
+                    termination_status(model))
+            println("DEBUG: the current main problem solution is\n", x̄)
+            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+        end
         error("eval_noncvx_Wass: nonconvex inner subproblem failed.")
     end
     ξ_star = value.(ξ)
@@ -206,7 +208,7 @@ function _gen_noncvx_cut_linear_recourse(
     # inner solver, so we cannot use `set_silent(model)` after the fact.
     # Instead, set the silent flag on the inner solver *before* wrapping
     # it with `PolyJuMP.QCQP`.
-    inner_factory = if print < 1
+    inner_factory = if print <= 1
         () -> begin
             inner = noncvx_solver()
             MOI.set(inner, MOI.Silent(), true)
@@ -257,10 +259,12 @@ function _gen_noncvx_cut_linear_recourse(
     @objective(model, Max, F_expr - w̄ * P_expr)
     optimize!(model)
     if !is_solved_and_feasible(model, allow_almost=true) && !has_values(model)
-        println("DEBUG: nonconvex linear-recourse subproblem $i did not solve, status: ",
-                termination_status(model))
-        println("DEBUG: the current main problem solution is\n", x̄)
-        println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+        if print >= 0
+            println("DEBUG: nonconvex linear-recourse subproblem $i did not solve, status: ",
+                    termination_status(model))
+            println("DEBUG: the current main problem solution is\n", x̄)
+            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+        end
         error("eval_noncvx_Wass: nonconvex inner subproblem failed.")
     end
     ξ_star = value.(ξ)

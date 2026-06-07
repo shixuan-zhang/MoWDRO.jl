@@ -47,19 +47,9 @@ let
     end
 end
 
-# Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
-# TOML with the same base name as the script.
-CONFIG_PATH = if length(ARGS) >= 1
-    ARGS[1]
-else
-    sibling = joinpath(@__DIR__, splitext(basename(@__FILE__))[1] * ".toml")
-    isfile(sibling) || error(
-        "no config supplied and no default sibling TOML at $sibling; " *
-        "usage: julia $(@__FILE__) [<config.toml>]"
-    )
-    sibling
-end
-CONFIG = TOML.parsefile(CONFIG_PATH)
+include(joinpath(@__DIR__, "..", "..", "experiment_common.jl"))
+CONFIG_PATH = resolve_config_path(@__FILE__)
+CONFIG      = TOML.parsefile(CONFIG_PATH)
 
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
@@ -74,44 +64,19 @@ NUM_DIG          = Int(PROB_CFG["number of digits"])
 
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
-# Training sample sizes from explicit list and/or {start, stop, step} sweeps.
-TRAIN_SIZES = Int[]
-if haskey(EXP_CFG, "training sample sizes")
-    append!(TRAIN_SIZES, Int.(EXP_CFG["training sample sizes"]))
-end
-if haskey(EXP_CFG, "training sample sweeps")
-    for sw in EXP_CFG["training sample sweeps"]
-        append!(TRAIN_SIZES, collect(Int(sw["start"]):Int(sw["step"]):Int(sw["stop"])))
-    end
-end
-TEST_SIZE   = Int(EXP_CFG["testing sample size"])
-OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
-MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
-MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
-MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
-BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+TRAIN_SIZES    = parse_train_sizes(EXP_CFG)
+TEST_SIZE      = Int(EXP_CFG["testing sample size"])
+OPT_GAP        = Float64(EXP_CFG["target optimality gap"])
+MIN_AUX        = Float64(EXP_CFG["Wasserstein dual min"])
+MAX_AUX        = Float64(EXP_CFG["Wasserstein dual max"])
+MIN_PHI        = Float64(EXP_CFG["loss lower bound"])
+BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
-# Wasserstein radii from explicit list and/or {start, stop, step} sweeps;
-# rounded to NUM_DIG digits to match the rest of the allocation data.
-WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
-WASS_RADII = Float64[]
-if haskey(EXP_CFG, "Wasserstein radii")
-    append!(WASS_RADII, Float64.(EXP_CFG["Wasserstein radii"]))
-end
-if haskey(EXP_CFG, "Wasserstein sweeps")
-    for sw in EXP_CFG["Wasserstein sweeps"]
-        append!(WASS_RADII, collect(Float64(sw["start"]):Float64(sw["step"]):Float64(sw["stop"])))
-    end
-end
-WASS_RADII = round.(WASS_RADII; digits=NUM_DIG)
+WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
+# round the radii to NUM_DIG digits to match the rest of the allocation data
+WASS_RADII     = round.(parse_wass_radii(EXP_CFG); digits=NUM_DIG)
 
-# OUTPUT_FILE: derived from script name + problem params, placed in the
-# directory where `julia` was invoked; allow ARGS[2] override.
-OUTPUT_FILE = if length(ARGS) >= 2
-    ARGS[2]
-else
-    joinpath(pwd(), "result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv")
-end
+OUTPUT_FILE = resolve_output_file("result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv")
 
 # Build the data tuple for the Hanasusanto-Kuhn (2018) copositive baseline
 # `solve_two_stage_copos` from the allocation-problem parameters. The
