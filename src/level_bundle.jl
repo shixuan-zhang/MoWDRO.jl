@@ -6,8 +6,8 @@
 const DEFAULT_LEVEL = 1/(2+sqrt(2))
 const BISECTION_TOL = 1e-3
 
-# helper function that finds feasible w through bisection and 
-# returns the cut together with the updated w
+# helper function for the level bundle method which finds a feasible w 
+# through bisection and returns the cut together with the updated w
 function bisection_feas_cut(
         subproblem::T,
         samples::Vector{Vector{Float64}},
@@ -140,8 +140,8 @@ function solve_main_level(
         println(" The initial upper bound = ", max_obj)
     end
     iter = 1
-    # loop until the bounds are close
-    while max_obj - min_obj > opt_gap
+    # loop until the bounds are close (in either the absolute or the relative sense)
+    while (max_obj - min_obj) / max(1, abs(min_obj)) > opt_gap
         # update the loss/recourse approximation
         @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
         # get an updated lower bound
@@ -157,7 +157,7 @@ function solve_main_level(
             error("The level method bounding step has failed with status: ", termination_status(main.model))
         end
         min_obj = objective_value(main.model)
-        if max_obj - min_obj <= opt_gap
+        if (max_obj - min_obj) / max(1, abs(min_obj)) <= opt_gap
             if print > 0
                 printfmtln(" The level method has converged with the updated lower bound {}.", min_obj)
             end

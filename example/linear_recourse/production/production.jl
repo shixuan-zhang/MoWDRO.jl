@@ -80,7 +80,16 @@ NUM_DIG     = Int(PROB_CFG["number of digits"])
 
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
-TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
+# Training sample sizes from explicit list and/or {start, stop, step} sweeps.
+TRAIN_SIZES = Int[]
+if haskey(EXP_CFG, "training sample sizes")
+    append!(TRAIN_SIZES, Int.(EXP_CFG["training sample sizes"]))
+end
+if haskey(EXP_CFG, "training sample sweeps")
+    for sw in EXP_CFG["training sample sweeps"]
+        append!(TRAIN_SIZES, collect(Int(sw["start"]):Int(sw["step"]):Int(sw["stop"])))
+    end
+end
 TEST_SIZE   = Int(EXP_CFG["testing sample size"])
 OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
 MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
@@ -338,6 +347,7 @@ function experiment_production(
     # prepare the table for output
     WASS_RAD   = Float64[]
     WASS_DEG   = Int[]
+    WASS_IDX   = Int[]
     TRAIN_SIZE = Int[]
     TRAIN_OBJ  = Float64[]
     TRAIN_TIME = Float64[]
@@ -370,10 +380,17 @@ function experiment_production(
     N_min = minimum(train_sizes)
     for N in train_sizes
         sample_train = sample_train_full[1:N]
-        for r in wass_radii
+        for (radius_idx, wass_r) in enumerate(wass_radii)
             # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
-            # s = radius_scaling; s ≤ 0 disables scaling.
-            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            # s = radius_scaling; s ≤ 0 disables scaling. `radius_idx` is
+            # the 1-based position of `wass_r` in the original `wass_radii`
+            # list and is preserved as the `WASS_IDX` CSV column so that
+            # rows sharing a configured radius can be matched across
+            # training-sample sizes even when the actual radius is scaled.
+            # (We use `wass_r` — not `r` — for the loop variable so it
+            # doesn't shadow the `r::Vector{Float64}` product-price kwarg
+            # used downstream by `build_copos_baseline_data`.)
+            scaled_r = radius_scaling > 0 ? wass_r / (N / N_min)^(1.0 / radius_scaling) : wass_r
             wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear/quadratic optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
@@ -410,6 +427,7 @@ function experiment_production(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
+            append!(WASS_IDX, radius_idx)
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
@@ -510,6 +528,7 @@ function experiment_production(
             # write the (possibly augmented) result file
             output = DataFrame(:WASS_DEG   => WASS_DEG,
                                :WASS_RAD   => WASS_RAD,
+                               :WASS_IDX   => WASS_IDX,
                                :TRAIN_SIZE => TRAIN_SIZE,
                                :TRAIN_TIME => TRAIN_TIME,
                                :TRAIN_OBJ  => TRAIN_OBJ,
