@@ -1,18 +1,18 @@
 [experiment]
-"training sample sizes"   = [{ start = 10, stop = 200, step = 10 }]
+"training sample sweeps"  = [{ start = 10, stop = 100, step = 10 }]
 "testing sample size"     = 10000
 "target optimality gap"   = 1.0e-2
 "Wasserstein dual min"    = 1.0e-1
 "Wasserstein dual max"    = 1.0e3
 "loss lower bound"        = -1.0e2
-"baseline method"         = "none"
-"radius scaling"          = 40
+"baseline method"         = "copos"
+"radius scaling"          = 20
 "Wasserstein order"       = 2
 "Wasserstein radii"       = [0.0, 1.0e-2, 5.0e-2, 1.0e-1]
 
 [problem]
-"number of parts"         = 20
-"number of products"      = 20
+"number of parts"         = 10
+"number of products"      = 10
 "minimum price"           = 2.0
 "maximum price"           = 5.0
 "minimum cost"            = 1.0

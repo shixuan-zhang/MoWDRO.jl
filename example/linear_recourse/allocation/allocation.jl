@@ -74,7 +74,7 @@ BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
 # round the radii to NUM_DIG digits to match the rest of the allocation data
-WASS_RADII     = round.(parse_wass_radii(EXP_CFG); digits=NUM_DIG)
+WASS_RADII     = parse_wass_radii(EXP_CFG)
 
 OUTPUT_FILE = resolve_output_file("result_allocation_$(NUM_FACILITY)_$(NUM_SITE).csv")
 
