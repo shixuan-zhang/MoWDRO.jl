@@ -6,13 +6,13 @@
 "Wasserstein dual max"    = 1.0e3
 "loss lower bound"        = -1.0e2
 "baseline method"         = "copos"
-"radius scaling"          = 20
+"radius scaling"          = 15
 "Wasserstein order"       = 2
 "Wasserstein radii"       = [0.0, 1.0e-2, 5.0e-2, 1.0e-1]
 
 [problem]
 "number of parts"         = 10
-"number of products"      = 10
+"number of products"      = 5 
 "minimum price"           = 2.0
 "maximum price"           = 5.0
 "minimum cost"            = 1.0
