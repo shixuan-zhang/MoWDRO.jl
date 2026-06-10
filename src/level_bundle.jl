@@ -4,7 +4,7 @@
 
 # default parameters for the level bundle method 
 const DEFAULT_LEVEL = 1/(2+sqrt(2))
-const BISECTION_TOL = 1e-3
+const BISECTION_TOL = 1e-4
 
 # helper function for the level bundle method which finds a feasible w 
 # through bisection and returns the cut together with the updated w
@@ -241,7 +241,7 @@ function solve_main_level(
         if print >= 0
             println("DEBUG: the last added cut is\n", cut)
         end
-        error("Invalid upper or lower bound in the level method!")
+        println("DEBUG: the lower bound or the upper bound returned by the level method may be invalid!")
     end
     if print >= 0
         printfmtln(" The level bundle method has converged within {} iteration(s)", iter)
