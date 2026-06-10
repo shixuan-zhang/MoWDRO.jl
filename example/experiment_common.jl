@@ -8,6 +8,7 @@
 #   OUTPUT_FILE = resolve_output_file("result_<name>.csv")
 
 using TOML
+using Random
 
 # Resolve the TOML config path: explicit ARGS[1] wins; otherwise look for
 # a sibling TOML with the same base name as the script. Pass `@__FILE__`
@@ -65,3 +66,32 @@ parse_train_sizes(exp_cfg::AbstractDict) =
 # and `{start, stop, step}` sweeps under `"Wasserstein radii sweeps"`.
 parse_wass_radii(exp_cfg::AbstractDict) =
     _expand_sweeps(Float64, exp_cfg, "Wasserstein radii", "Wasserstein radii sweeps")
+
+"""
+    apply_random_seed!(exp_cfg) -> Union{Int,Nothing}
+
+Honour the optional `"random seed"` key under `[experiment]`. Accepted
+values are:
+
+* an integer — passed through to `Random.seed!`; returned to the caller
+  so the script can log which seed was applied.
+* the string `"none"` (case-insensitive) — interpreted as "no seeding";
+  returns `nothing`.
+* absent — same as `"none"`.
+
+Anything else is an error.
+"""
+function apply_random_seed!(exp_cfg::AbstractDict)
+    haskey(exp_cfg, "random seed") || return nothing
+    v = exp_cfg["random seed"]
+    if v isa AbstractString
+        lowercase(v) == "none" && return nothing
+        error("[experiment] \"random seed\" must be an integer or the string \"none\"; got $(repr(v))")
+    elseif v isa Integer
+        seed = Int(v)
+        Random.seed!(seed)
+        return seed
+    else
+        error("[experiment] \"random seed\" must be an integer or the string \"none\"; got $(repr(v))")
+    end
+end

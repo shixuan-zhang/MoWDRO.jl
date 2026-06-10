@@ -70,6 +70,7 @@ NUM_DIG     = Int(PROB_CFG["number of digits"])
 
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
+SEED           = apply_random_seed!(EXP_CFG)
 TRAIN_SIZES    = parse_train_sizes(EXP_CFG)
 TEST_SIZE      = Int(EXP_CFG["testing sample size"])
 OPT_GAP        = Float64(EXP_CFG["target optimality gap"])
