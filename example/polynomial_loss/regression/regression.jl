@@ -50,6 +50,7 @@ OPT_GAP        = Float64(EXP_CFG["target optimality gap"])
 MIN_AUX        = Float64(EXP_CFG["Wasserstein dual min"])
 MAX_AUX        = Float64(EXP_CFG["Wasserstein dual max"])
 MIN_PHI        = Float64(EXP_CFG["loss lower bound"])
+MAX_CUT_COEF   = Float64(EXP_CFG["maximum cut coefficient"])
 BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
@@ -207,6 +208,7 @@ function experiment_regression(
                                    max_aux=MAX_AUX,
                                    min_aux=MIN_AUX,
                                    min_phi=MIN_PHI,
+                                   max_cut_coef=MAX_CUT_COEF,
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,

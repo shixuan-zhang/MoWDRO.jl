@@ -4,7 +4,7 @@
 
 # default parameters for the level bundle method 
 const DEFAULT_LEVEL = 1/(2+sqrt(2))
-const BISECTION_TOL = 1e-4
+const BISECTION_TOL = 1.0e-2
 
 # helper function for the level bundle method which finds a feasible w 
 # through bisection and returns the cut together with the updated w
@@ -17,13 +17,13 @@ function bisection_feas_cut(
         eval_cut::Function;
         max_aux::Float64 = VAL_INF,
         min_aux::Float64 = 0.0,
-        feas_tol::Float64 = -1.0,
-        flag_safe::Bool = false,
+        coef_max::Float64 = VAL_INF,
+        feas_tol::Float64 = BISECTION_TOL,
+        flag_safe::Bool = true,
         print::Int = 0
     ) where T <: SampleSubproblem
-    # set the tolerance if not supplied
-    if feas_tol < 0.0
-        feas_tol = (max_aux-min_aux) * BISECTION_TOL
+    if feas_tol <= 0.0
+        error("Invalid bisection tolerance supplied in Wasserstein dual variable adjustment.")
     end
     # initialization
     w_lb = max(sol_w, min_aux)
@@ -34,7 +34,7 @@ function bisection_feas_cut(
     cut_best = cut_temp
     # bisection in w
     while w_ub - w_lb > feas_tol
-        if isnothing(cut_temp)
+        if isnothing(cut_temp) || maximum(abs.(cut_temp)) > coef_max
             w_lb = w_temp
         else
             cut_best = cut_temp
@@ -48,8 +48,8 @@ function bisection_feas_cut(
         w_best += feas_tol
         cut_best = eval_cut(subproblem, [sol_x;w_best], samples, wassinfo, print=print-1)
     end
-    if isnothing(cut_best)
-        error("The moment relaxation is infeasible or unbounded for any Wasserstein dual.")
+    if isnothing(cut_best) || maximum(abs.(cut_best)) > coef_max
+        error("The moment relaxation is numerically infeasible for any Wasserstein dual.")
     end
     if print >= 0
         println("  Adjusting Wasserstein auxiliary variable from ", sol_w, " to ", w_best, " for cut generation.")
@@ -68,6 +68,7 @@ function solve_main_level(
         max_aux::Float64 = VAL_INF,
         min_aux::Float64 = 0.0,
         min_phi::Float64 = -VAL_INF,
+        max_cut_coef::Float64 = VAL_INF, # for numerical stability
         level::Float64 = DEFAULT_LEVEL,
         mom_solver = DEFAULT_SDP,
         cut_evaluator = nothing,
@@ -118,9 +119,10 @@ function solve_main_level(
     cut = zeros(dim_x+2)
     if flag_Wass
         cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
-        if isnothing(cut) # the moment relaxation is unbounded/infeasible
+        if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef # the moment relaxation is unbounded/infeasible
             cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut, 
-                                            max_aux=max_aux, min_aux=min_aux, print=print)
+                                            max_aux=max_aux, min_aux=min_aux, 
+                                            coef_max=max_cut_coef, print=print)
         end
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
@@ -199,9 +201,10 @@ function solve_main_level(
         cut = zeros(dim_x+2)
         if flag_Wass
             cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
-            if isnothing(cut) # the moment relaxation is unbounded/infeasible
-                cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut,
-                                                max_aux=max_aux, min_aux=min_aux, print=print)
+            if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef # the moment relaxation is unbounded/infeasible
+                cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut, 
+                                                max_aux=max_aux, min_aux=min_aux, 
+                                                coef_max=max_cut_coef, print=print)
             end
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
