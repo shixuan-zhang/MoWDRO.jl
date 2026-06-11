@@ -5,10 +5,10 @@
 "Wasserstein dual min"    = 1.0e-2
 "Wasserstein dual max"    = 1.0e4
 "loss lower bound"        = 0.0
-"maximum cut coefficient" = 1.0e3
+"maximum cut coefficient" = 1.0e4
 "baseline method"         = "none"
 "radius scaling"          = 5
-"random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"random seed"             = 97  # allowed: integer (e.g. 42) | "none" for fresh random seeding
 "Wasserstein order"       = 4
 "Wasserstein radii"       = [0.0, 1.0e-2, 5.0e-2, 1.0e-1, 5.0e-1, 1.0]
 
