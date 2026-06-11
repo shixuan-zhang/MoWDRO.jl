@@ -1,5 +1,5 @@
 [experiment]
-"training sample sizes"   = [{ start = 10, stop = 200, step = 10 }]
+"training sample sweeps"  = [{ start = 10, stop = 200, step = 10 }]
 "testing sample size"     = 10000
 "target optimality gap"   = 1.0e-2
 "Wasserstein dual min"    = 1.0e-1
