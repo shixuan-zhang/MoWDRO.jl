@@ -5,6 +5,7 @@ module MoWDRO
 using LinearAlgebra, DynamicPolynomials, SumOfSquares, SemialgebraicSets, MultivariateMoments
 using JuMP, PolyJuMP
 using Format
+using Distributed
 # set default solvers
 import HiGHS, CSDP, SCIP
 const DEFAULT_LP = HiGHS.Optimizer

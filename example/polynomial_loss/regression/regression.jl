@@ -12,65 +12,59 @@
 # and v = g(z) + ϵ for some randomly generated polynomial g of degree d,
 # and ϵ is a Gaussian noise with mean 0 and variance σ².
 
+using Distributed
+# load modules on the main process
 using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
 using Gurobi, Mosek, MosekTools
+using MoWDRO
 const GRB_ENV = Gurobi.Env()
-include("../../../src/MoWDRO.jl")
-using .MoWDRO
-
-# Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
-# TOML with the same base name as the script.
-CONFIG_PATH = if length(ARGS) >= 1
-    ARGS[1]
-else
-    sibling = joinpath(@__DIR__, splitext(basename(@__FILE__))[1] * ".toml")
-    isfile(sibling) || error(
-        "no config supplied and no default sibling TOML at $sibling; " *
-        "usage: julia $(@__FILE__) [<config.toml>]"
-    )
-    sibling
+# load modules on the worker processes
+let
+    setup_expr = quote
+        using JuMP
+        using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
+        using Gurobi, Mosek, MosekTools
+        using MoWDRO
+        const GRB_ENV = Gurobi.Env()
+    end
+    for w in workers()
+        w == myid() && continue
+        remotecall_wait(w) do
+            Base.eval(Main, setup_expr)
+        end
+    end
 end
-CONFIG = TOML.parsefile(CONFIG_PATH)
+
+include(joinpath(@__DIR__, "..", "..", "experiment_common.jl"))
+CONFIG_PATH = resolve_config_path(@__FILE__)
+CONFIG      = TOML.parsefile(CONFIG_PATH)
 
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
-TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
-TEST_SIZE   = Int(EXP_CFG["testing sample size"])
-OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
-MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
-MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
-MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
-BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+SEED           = apply_random_seed!(EXP_CFG)
+TRAIN_SIZES    = parse_train_sizes(EXP_CFG)
+TEST_SIZE      = Int(EXP_CFG["testing sample size"])
+OPT_GAP        = Float64(EXP_CFG["target optimality gap"])
+MIN_AUX        = Float64(EXP_CFG["Wasserstein dual min"])
+MAX_AUX        = Float64(EXP_CFG["Wasserstein dual max"])
+MIN_PHI        = Float64(EXP_CFG["loss lower bound"])
+MAX_CUT_COEF   = Float64(EXP_CFG["maximum cut coefficient"])
+BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
-# Wasserstein radii from explicit list and/or {start, stop, step} sweeps.
-WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
-WASS_RADII = Float64[]
-if haskey(EXP_CFG, "Wasserstein radii")
-    append!(WASS_RADII, Float64.(EXP_CFG["Wasserstein radii"]))
-end
-if haskey(EXP_CFG, "Wasserstein sweeps")
-    for sw in EXP_CFG["Wasserstein sweeps"]
-        append!(WASS_RADII, collect(Float64(sw["start"]):Float64(sw["step"]):Float64(sw["stop"])))
-    end
-end
+WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
+WASS_RADII     = parse_wass_radii(EXP_CFG)
 
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
 NUM_VAR     = Int(PROB_CFG["number of variables"])
-DEG_POLY    = Int(PROB_CFG["polynomial degree"])
+DEG_POLY    = Int(PROB_CFG["truth polynomial degree"])
 NOISE_SIGMA = Float64(PROB_CFG["noise standard deviation"])
 SUPPORT_SET = String(PROB_CFG["support set"])
 SPARSE_PROB = Float64(PROB_CFG["probability for sparsity"])
 
-# OUTPUT_FILE: derived from script name + problem params, placed in the
-# directory where `julia` was invoked; allow ARGS[2] override.
-OUTPUT_FILE = if length(ARGS) >= 2
-    ARGS[2]
-else
-    joinpath(pwd(), "result_regression_$(NUM_VAR)_$(DEG_POLY).csv")
-end
+OUTPUT_FILE = resolve_output_file("result_regression_$(NUM_VAR)_$(DEG_POLY).csv")
 
 # helper function to generate multiindices of n variables up to degree d
 function multiindices(n, d)
@@ -131,16 +125,16 @@ function experiment_regression(
     elseif support_set == "orthant"
         z->abs.(z)
     elseif support_set == "box"
-        z->(z.^2)./(1+z.^2)
+        z->(z.^2)./(1 .+ z.^2)
     end
     augment_sample = z -> [transform_sample(z); truth(transform_sample(z))+randn()*σ]
     N_max = maximum(train_sizes)
     sample_train_full = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:N_max])
     sample_test       = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:test_size])
-    # define the loss function
+    # define the loss function (scaled with n for numerical stability)
     n = length(A)
     @polyvar x[1:n] ξ[1:(m+1)] # ξ = (z,v)
-    F = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2
+    F = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2 / (sparse_prob*n) 
     ∇ₓF = differentiate(F,x)
     Ξ = basicsemialgebraicset(FullSpace(), if support_set == "orthant"
                                     [ξ[i] + 0.0 for i in 1:m]
@@ -164,6 +158,7 @@ function experiment_regression(
     # prepare the table for output
     WASS_RAD   = Float64[]
     WASS_DEG   = Int[]
+    WASS_IDX   = Int[]
     TRAIN_SIZE = Int[]
     TRAIN_OBJ  = Float64[]
     TRAIN_TIME = Float64[]
@@ -186,10 +181,14 @@ function experiment_regression(
     N_min = minimum(train_sizes)
     for N in train_sizes
         sample_train = sample_train_full[1:N]
-        for r in wass_radii
+        for (radius_idx, wass_r) in enumerate(wass_radii)
             # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
-            # s = radius_scaling; s ≤ 0 disables scaling.
-            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            # s = radius_scaling; s ≤ 0 disables scaling. `radius_idx` is
+            # the 1-based position of `wass_r` in the original `wass_radii`
+            # list and is preserved as the `WASS_IDX` CSV column so that
+            # rows sharing a configured radius can be matched across
+            # training-sample sizes even when the actual radius is scaled.
+            scaled_r = radius_scaling > 0 ? wass_r / (N / N_min)^(1.0 / radius_scaling) : wass_r
             wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
@@ -198,6 +197,9 @@ function experiment_regression(
             w = @variable(model, w >= 0, base_name="w")
             ϕ = @variable(model, ϕ >= 0, base_name="ϕ")
             main = MainProblem(model, x, VariableRef[], w, ϕ, zeros(n), Float64[])
+            # set the Wasserstein dual variable feasibility tolerance 
+            # relative to the optimality gap
+            tol_aux_feas = OPT_GAP / (2*wass_r^wass_order)
             # solve the problem
             time_start = time()
             sol = solve_main_level(main,
@@ -209,6 +211,8 @@ function experiment_regression(
                                    max_aux=MAX_AUX,
                                    min_aux=MIN_AUX,
                                    min_phi=MIN_PHI,
+                                   max_cut_coef=MAX_CUT_COEF,
+                                   tol_aux_feas=tol_aux_feas,
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
@@ -226,6 +230,7 @@ function experiment_regression(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
+            append!(WASS_IDX, radius_idx)
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
@@ -250,6 +255,8 @@ function experiment_regression(
                 noncvx_solver = () -> begin
                     opt = Gurobi.Optimizer(GRB_ENV)
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("MIPGap"), 1e-2)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), 1e-3)
                     opt
                 end
                 eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
@@ -260,7 +267,7 @@ function experiment_regression(
                                           loss,
                                           sample_train,
                                           wassinfo,
-                                          print=1,
+                                          print=2, # TODO: disable detailed printing after debugging
                                           opt_gap=OPT_GAP,
                                           max_aux=MAX_AUX,
                                           min_aux=MIN_AUX,
@@ -284,6 +291,7 @@ function experiment_regression(
             end
             output = DataFrame(:WASS_DEG   => WASS_DEG,
                                :WASS_RAD   => WASS_RAD,
+                               :WASS_IDX   => WASS_IDX,
                                :TRAIN_SIZE => TRAIN_SIZE,
                                :TRAIN_TIME => TRAIN_TIME,
                                :TRAIN_OBJ  => TRAIN_OBJ,
@@ -304,6 +312,10 @@ function experiment_regression(
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
             println("\n\n")
+            # ensure per-iteration logs reach the terminal in real time —
+            # Distributed workers leave the main process with a block-
+            # buffered stdout when output is piped or redirected.
+            flush(stdout)
         end
     end
 end

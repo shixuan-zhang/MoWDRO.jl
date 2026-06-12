@@ -1,11 +1,11 @@
 # numerical example for a two-stage production problem
 # (adapted from Chapter 1.3.1 in Shapiro-Dentcheva-Ruszczyński(2009)):
 # min fₓᵀx + E[F(x,ξ)], x ∈ [0,D]ⁿ, where fₓ ∈ [0,1]ⁿ, and
-# F(x,ξ) := min  -∑ᵢ rᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
+# F(x,ξ) := min  -∑ᵢ ρᵢ⋅zᵢ - ∑ⱼ sᵢ(ξ)⋅wⱼ + ∑ⱼ gⱼ⋅uⱼ
 #           s.t. wⱼ - uⱼ = tⱼ(ξ)⋅xⱼ - ∑ᵢ pᵢⱼ⋅zᵢ, ∀ j = 1,…,n,
 #                0 ≤ zᵢ ≤ qᵢ(ξ),                 ∀ i = 1,…,m,
 #                wⱼ, uⱼ ≥ 0,                     ∀ j = 1,…,n.
-# Here, rᵢ > 0 is the product price,
+# Here, ρᵢ > 0 is the product price,
 # gⱼ is the late price for ingredient purchasing,
 # pᵢⱼ is the percentage of ingredient j in product i,
 # sᵢ(ξ) ∼ Uniform(0,1) is the random salvage price
@@ -19,32 +19,38 @@
 # By linear duality, we can write F alternatively as
 # F(x,ξ) = max  -(t(ξ)⋅xᵀ, q(ξ)ᵀ)⋅y
 #               = (1,x)ᵀ⋅[0 0 -q(ξ)ᵀ; 0 -diag(t(ξ)) 0]⋅(1,y)
-#          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; r; -r; 0]
+#          s.t. [I 0; -I 0; Pᵀ I; 0 -I; 0 I] y ≥ [s(ξ); -g; ρ; -ρ; 0]
 
 
-using JuMP
+using Distributed
+# load modules on the main process
+using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
-using TOML
 # use commercial solvers for efficiency and numerical stability
 using Gurobi, Mosek, MosekTools
+using MoWDRO
 const GRB_ENV = Gurobi.Env()
-include("../../../src/MoWDRO.jl")
-using .MoWDRO
-
-# Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
-# TOML with the same base name as the script.
-CONFIG_PATH = if length(ARGS) >= 1
-    ARGS[1]
-else
-    sibling = joinpath(@__DIR__, splitext(basename(@__FILE__))[1] * ".toml")
-    isfile(sibling) || error(
-        "no config supplied and no default sibling TOML at $sibling; " *
-        "usage: julia $(@__FILE__) [<config.toml>]"
-    )
-    sibling
+# load modules on the worker processes
+let
+    setup_expr = quote
+        using JuMP
+        using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
+        using Gurobi, Mosek, MosekTools
+        using MoWDRO
+        const GRB_ENV = Gurobi.Env()
+    end
+    for w in workers()
+        w == myid() && continue
+        remotecall_wait(w) do
+            Base.eval(Main, setup_expr)
+        end
+    end
 end
-CONFIG = TOML.parsefile(CONFIG_PATH)
+
+include(joinpath(@__DIR__, "..", "..", "experiment_common.jl"))
+CONFIG_PATH = resolve_config_path(@__FILE__)
+CONFIG      = TOML.parsefile(CONFIG_PATH)
 
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
@@ -64,35 +70,20 @@ NUM_DIG     = Int(PROB_CFG["number of digits"])
 
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
-TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
-TEST_SIZE   = Int(EXP_CFG["testing sample size"])
-OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
-MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
-MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
-MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
-BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+SEED           = apply_random_seed!(EXP_CFG)
+TRAIN_SIZES    = parse_train_sizes(EXP_CFG)
+TEST_SIZE      = Int(EXP_CFG["testing sample size"])
+OPT_GAP        = Float64(EXP_CFG["target optimality gap"])
+MIN_AUX        = Float64(EXP_CFG["Wasserstein dual min"])
+MAX_AUX        = Float64(EXP_CFG["Wasserstein dual max"])
+MIN_PHI        = Float64(EXP_CFG["loss lower bound"])
+BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
-# Wasserstein radii from explicit list and/or {start, stop, step} sweeps;
-# rounded to NUM_DIG digits to match the rest of the production data.
-WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
-WASS_RADII = Float64[]
-if haskey(EXP_CFG, "Wasserstein radii")
-    append!(WASS_RADII, Float64.(EXP_CFG["Wasserstein radii"]))
-end
-if haskey(EXP_CFG, "Wasserstein sweeps")
-    for sw in EXP_CFG["Wasserstein sweeps"]
-        append!(WASS_RADII, collect(Float64(sw["start"]):Float64(sw["step"]):Float64(sw["stop"])))
-    end
-end
-WASS_RADII = round.(WASS_RADII; digits=NUM_DIG)
+WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
+# round the radii to NUM_DIG digits to match the rest of the production data
+WASS_RADII     = parse_wass_radii(EXP_CFG)
 
-# OUTPUT_FILE: derived from script name + problem params, placed in the
-# directory where `julia` was invoked; allow ARGS[2] override.
-OUTPUT_FILE = if length(ARGS) >= 2
-    ARGS[2]
-else
-    joinpath(pwd(), "result_production_$(NUM_PART)_$(NUM_PROD).csv")
-end
+OUTPUT_FILE = resolve_output_file("result_production_$(NUM_PART)_$(NUM_PROD).csv")
 
 # Build the data tuple for the Hanasusanto-Kuhn (2018) copositive baseline
 # `solve_two_stage_copos` from the production-problem parameters. The
@@ -100,7 +91,7 @@ end
 # positional arguments expected by `solve_two_stage_copos`.
 function build_copos_baseline_data(
         n::Int, m::Int,
-        r::Vector{Float64}, s::Vector{Float64}, t::Vector{Int},
+        ρ::Vector{Float64}, s::Vector{Float64}, t::Vector{Int},
         g::Vector{Float64}, d::Vector{Float64}, P::Matrix{Float64},
         D::Float64, f_x::Vector{Float64},
     )
@@ -118,12 +109,12 @@ function build_copos_baseline_data(
     K_HK   = m + n                      # dim(ξ)
     Mh_HK  = 4n + 2m                    # row dim of W before support extension
     # Cost vector  Q ξ + q  on y = (z; w; u):
-    #   z-block (length m):  -r              (constant)
+    #   z-block (length m):  -ρ              (constant)
     #   w-block (length n):  -s(ξ)           (nonperishable: -s_j ξ_{m+j};  perishable: -s_j)
     #   u-block (length n):  +g              (constant)
     Q_HK = zeros(N_y_HK, K_HK)
     q_HK = zeros(N_y_HK)
-    for i = 1:m;  q_HK[i]            = -r[i];  end                # z block
+    for i = 1:m;  q_HK[i]            = -ρ[i];  end                # z block
     for j = 1:n
         if t[j] == 1                                              # nonperishable
             Q_HK[m + j, m + j] = -s[j]
@@ -208,7 +199,7 @@ function experiment_production(
         D::Float64 = STORAGE_MAX,                   # maximum ingredient storage capacity
         f_x::Vector{Float64} = zeros(0),            # vector of ingredient costs
         P::Matrix{Float64} = zeros(0,0),            # matrix of production coefficients
-        r::Vector{Float64} = zeros(0),              # vector of regular product prices
+        ρ::Vector{Float64} = zeros(0),              # vector of regular product prices
         d::Vector{Float64} = zeros(0),              # vector of standard demands
         σ::Vector{Float64} = zeros(0),              # vector of demand logarithmic variances
         g::Vector{Float64} = zeros(0),              # vector of late ingredient costs
@@ -238,10 +229,10 @@ function experiment_production(
         end
     end
     # check if the product prices are supplied
-    if length(r) != m
-        r = zeros(m)
+    if length(ρ) != m
+        ρ = zeros(m)
         for j = 1:m
-            r[j] = round(PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIG)
+            ρ[j] = round(PRICE_MAX - (PRICE_MAX-PRICE_MIN)*(j-1)/(m-1), digits=NUM_DIG)
         end
     end
     # check if the standard demands are supplied
@@ -297,19 +288,19 @@ function experiment_production(
     # define the two-stage linear recourse function,
     C = [zeros(n+1)' -(d.*ξ[1:m])'; zeros(n) -Diagonal(C_t) zeros(n,m)]
     A = [I zeros(n,m); -I zeros(n,m); P' I; zeros(m,n) -I; zeros(m,n) I] .+ 0.0*sum(ξ) # to promote the type
-    b = [b_s; -g; r; -r; zeros(m)]
+    b = [b_s; -g; ρ; -ρ; zeros(m)]
     Ξ = basicsemialgebraicset(FullSpace(),
                               [[ξ[i] for i in 1:m+n];
                                [1-ξ[i] for i in m+1:m+n];
                                [ξ[i]*(1-ξ[i]) for i in m+1:m+n]
                               ])
-    B = [g; r]
+    B = [g; ρ]
     recourse = SampleLinearRecourse(x, ξ, y, C, A, b, Ξ, B)
     # print the problem information
     println("Start the experiment on the two-stage production problem...")
     println("The number of ingredients is ", n)
     println("The number of products is ", m)
-    println("The product prices are ", r)
+    println("The product prices are ", ρ)
     println("The ingredient prices are ", f_x)
     println("The ingredient maximum salvage prices are ", s)
     println("The late ingredient prices are ", g)
@@ -322,6 +313,7 @@ function experiment_production(
     # prepare the table for output
     WASS_RAD   = Float64[]
     WASS_DEG   = Int[]
+    WASS_IDX   = Int[]
     TRAIN_SIZE = Int[]
     TRAIN_OBJ  = Float64[]
     TRAIN_TIME = Float64[]
@@ -354,10 +346,17 @@ function experiment_production(
     N_min = minimum(train_sizes)
     for N in train_sizes
         sample_train = sample_train_full[1:N]
-        for r in wass_radii
+        for (radius_idx, wass_r) in enumerate(wass_radii)
             # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
-            # s = radius_scaling; s ≤ 0 disables scaling.
-            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            # s = radius_scaling; s ≤ 0 disables scaling. `radius_idx` is
+            # the 1-based position of `wass_r` in the original `wass_radii`
+            # list and is preserved as the `WASS_IDX` CSV column so that
+            # rows sharing a configured radius can be matched across
+            # training-sample sizes even when the actual radius is scaled.
+            # (We use `wass_r` — not `r` — for the loop variable so it
+            # doesn't shadow the `r::Vector{Float64}` product-price kwarg
+            # used downstream by `build_copos_baseline_data`.)
+            scaled_r = radius_scaling > 0 ? wass_r / (N / N_min)^(1.0 / radius_scaling) : wass_r
             wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear/quadratic optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
@@ -394,6 +393,7 @@ function experiment_production(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
+            append!(WASS_IDX, radius_idx)
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
@@ -409,7 +409,7 @@ function experiment_production(
             if baseline in ("copos", "all")
                 # Build paper Eq.(1)+Eq.(3) data for the Hanasusanto-Kuhn (2018)
                 # copositive baseline; see `build_copos_baseline_data` for details.
-                data_HK = build_copos_baseline_data(n, m, r, s, t, g, d, P, D, f_x)
+                data_HK = build_copos_baseline_data(n, m, ρ, s, t, g, d, P, D, f_x)
                 println("Built copositive-baseline data: matrix size = ",
                         (m + n) + (4n + 2m + n) + 1,
                         " per sample (", N, " samples).")
@@ -422,7 +422,7 @@ function experiment_production(
                                                sample_train, wassinfo.r;
                                                solver = Mosek.Optimizer,
                                                silent = true,
-                                               δ = 0.1)
+                                               δ = 0.0)
                 time_finish_HK = time()
                 println("  Copositive baseline status    = ", res_HK.status)
                 println("  Copositive baseline x         = ", res_HK.x)
@@ -494,6 +494,7 @@ function experiment_production(
             # write the (possibly augmented) result file
             output = DataFrame(:WASS_DEG   => WASS_DEG,
                                :WASS_RAD   => WASS_RAD,
+                               :WASS_IDX   => WASS_IDX,
                                :TRAIN_SIZE => TRAIN_SIZE,
                                :TRAIN_TIME => TRAIN_TIME,
                                :TRAIN_OBJ  => TRAIN_OBJ,
@@ -523,6 +524,10 @@ function experiment_production(
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
             println("\n\n")
+            # ensure per-iteration logs reach the terminal in real time —
+            # Distributed workers leave the main process with a block-
+            # buffered stdout when output is piped or redirected.
+            flush(stdout)
         end
     end
 end

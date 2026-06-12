@@ -6,49 +6,48 @@
 # a convex univariate polynomial.
 
 
+using Distributed
+# load modules on the main process
 using JuMP, TOML
 using LinearAlgebra, DynamicPolynomials, SemialgebraicSets, Statistics
 using DataFrames, CSV
 using Gurobi, Mosek, MosekTools
+using MoWDRO
 const GRB_ENV = Gurobi.Env()
-include("../../../src/MoWDRO.jl")
-using .MoWDRO
-
-# Resolve config path: explicit ARGS[1] wins; otherwise look for a sibling
-# TOML with the same base name as the script.
-CONFIG_PATH = if length(ARGS) >= 1
-    ARGS[1]
-else
-    sibling = joinpath(@__DIR__, splitext(basename(@__FILE__))[1] * ".toml")
-    isfile(sibling) || error(
-        "no config supplied and no default sibling TOML at $sibling; " *
-        "usage: julia $(@__FILE__) [<config.toml>]"
-    )
-    sibling
+# load modules on the worker processes
+let
+    setup_expr = quote
+        using JuMP
+        using LinearAlgebra, DynamicPolynomials, SemialgebraicSets
+        using Gurobi, Mosek, MosekTools
+        using MoWDRO
+        const GRB_ENV = Gurobi.Env()
+    end
+    for w in workers()
+        w == myid() && continue
+        remotecall_wait(w) do
+            Base.eval(Main, setup_expr)
+        end
+    end
 end
-CONFIG = TOML.parsefile(CONFIG_PATH)
+
+include(joinpath(@__DIR__, "..", "..", "experiment_common.jl"))
+CONFIG_PATH = resolve_config_path(@__FILE__)
+CONFIG      = TOML.parsefile(CONFIG_PATH)
 
 # bind experiment-wide settings from [experiment]
 const EXP_CFG = CONFIG["experiment"]
-TRAIN_SIZES = Vector{Int}(EXP_CFG["training sample sizes"])
-TEST_SIZE   = Int(EXP_CFG["testing sample size"])
-OPT_GAP     = Float64(EXP_CFG["target optimality gap"])
-MIN_AUX     = Float64(EXP_CFG["Wasserstein dual min"])
-MAX_AUX     = Float64(EXP_CFG["Wasserstein dual max"])
-MIN_PHI     = Float64(EXP_CFG["loss lower bound"])
-BASELINE    = String(get(EXP_CFG, "baseline method", "none"))
+SEED           = apply_random_seed!(EXP_CFG)
+TRAIN_SIZES    = parse_train_sizes(EXP_CFG)
+TEST_SIZE      = Int(EXP_CFG["testing sample size"])
+OPT_GAP        = Float64(EXP_CFG["target optimality gap"])
+MIN_AUX        = Float64(EXP_CFG["Wasserstein dual min"])
+MAX_AUX        = Float64(EXP_CFG["Wasserstein dual max"])
+MIN_PHI        = Float64(EXP_CFG["loss lower bound"])
+BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
-# Wasserstein radii from explicit list and/or {start, stop, step} sweeps.
-WASS_ORDER = Int(EXP_CFG["Wasserstein order"])
-WASS_RADII = Float64[]
-if haskey(EXP_CFG, "Wasserstein radii")
-    append!(WASS_RADII, Float64.(EXP_CFG["Wasserstein radii"]))
-end
-if haskey(EXP_CFG, "Wasserstein sweeps")
-    for sw in EXP_CFG["Wasserstein sweeps"]
-        append!(WASS_RADII, collect(Float64(sw["start"]):Float64(sw["step"]):Float64(sw["stop"])))
-    end
-end
+WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
+WASS_RADII     = parse_wass_radii(EXP_CFG)
 
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
@@ -56,13 +55,7 @@ NUM_VAR  = Int(PROB_CFG["number of variables"])
 NUM_FAC  = Int(PROB_CFG["number of factors"])
 DEG_LOSS = Int(PROB_CFG["loss polynomial degree"])
 
-# OUTPUT_FILE: derived from script name + problem params, placed in the
-# directory where `julia` was invoked; allow ARGS[2] override.
-OUTPUT_FILE = if length(ARGS) >= 2
-    ARGS[2]
-else
-    joinpath(pwd(), "result_portfolio_$(NUM_VAR)_$(NUM_FAC).csv")
-end
+OUTPUT_FILE = resolve_output_file("result_portfolio_$(NUM_VAR)_$(NUM_FAC).csv")
 
 
 # function that conducts the experiment on the portfolio examples
@@ -143,6 +136,7 @@ function experiment_portfolio(
     # prepare the table for output
     WASS_RAD   = Float64[]
     WASS_DEG   = Int[]
+    WASS_IDX   = Int[]
     TRAIN_SIZE = Int[]
     TRAIN_OBJ  = Float64[]
     TRAIN_TIME = Float64[]
@@ -165,10 +159,14 @@ function experiment_portfolio(
     N_min = minimum(train_sizes)
     for N in train_sizes
         sample_train = sample_train_full[1:N]
-        for r in wass_radii
+        for (radius_idx, wass_r) in enumerate(wass_radii)
             # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
-            # s = radius_scaling; s ≤ 0 disables scaling.
-            scaled_r = radius_scaling > 0 ? r / (N / N_min)^(1.0 / radius_scaling) : r
+            # s = radius_scaling; s ≤ 0 disables scaling. `radius_idx` is
+            # the 1-based position of `wass_r` in the original `wass_radii`
+            # list and is preserved as the `WASS_IDX` CSV column so that
+            # rows sharing a configured radius can be matched across
+            # training-sample sizes even when the actual radius is scaled.
+            scaled_r = radius_scaling > 0 ? wass_r / (N / N_min)^(1.0 / radius_scaling) : wass_r
             wassinfo = WassInfo(scaled_r, wass_order)
             # define the main linear optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
@@ -207,6 +205,7 @@ function experiment_portfolio(
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
+            append!(WASS_IDX, radius_idx)
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
@@ -266,6 +265,7 @@ function experiment_portfolio(
             end
             output = DataFrame(:WASS_DEG   => WASS_DEG,
                                :WASS_RAD   => WASS_RAD,
+                               :WASS_IDX   => WASS_IDX,
                                :TRAIN_SIZE => TRAIN_SIZE,
                                :TRAIN_TIME => TRAIN_TIME,
                                :TRAIN_OBJ  => TRAIN_OBJ,
@@ -286,6 +286,10 @@ function experiment_portfolio(
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
             println("\n\n")
+            # ensure per-iteration logs reach the terminal in real time —
+            # Distributed workers leave the main process with a block-
+            # buffered stdout when output is piped or redirected.
+            flush(stdout)
         end
     end
 end
