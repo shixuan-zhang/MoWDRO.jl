@@ -1,9 +1,15 @@
-# Level bundle method for solving the main problem of the form
+# Bundle methods for solving the main problem of the form
 # min  f_x'⋅x + f_u'⋅u + ϕ(x,w)
 # s.t. (x,u) ∈ Feasible Set, w ≥ 0.
 
-# default parameters for the level bundle method 
+# default parameters for the level bundle method
 const DEFAULT_LEVEL = 1/(2+sqrt(2))
+
+# default parameters for the proximal bundle method (Kiwiel, Math. Prog. 1990)
+const DEFAULT_INIT_WEIGHT   = 1.0
+const DEFAULT_MIN_WEIGHT    = 1.0e-10
+const DEFAULT_SERIOUS_RATIO = 0.1
+const DEFAULT_TIGHT_RATIO   = 0.5
 
 # helper function for the level bundle method which finds a feasible w 
 # through bisection and returns the cut together with the updated w
@@ -248,6 +254,193 @@ function solve_main_level(
     end
     if print >= 0
         printfmtln(" The level bundle method has converged within {} iteration(s)", iter)
+    end
+    return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
+end
+
+# function implementing a proximal bundle method (Kiwiel, Math. Prog. 1990, Algorithm 2.1)
+# to solve the main problem. The stability center (cen_x, cen_w) is updated by
+# either a "serious step" or kept by a "null step", based on the descent test
+# f(y^{k+1}) ≤ f(x^k) + m_L⋅v^k, where y^{k+1} is the proximal QP solution
+# and v^k = f̂(y^{k+1}) - f(x^k) is the predicted descent of the polyhedral model.
+function solve_main_proximal(
+        main::MainProblem,
+        subproblem::T,
+        samples::Vector{Vector{Float64}},
+        wassinfo::WassInfo = WassInfo(.0,2);
+        max_iter::Int = NUM_MAX_ITER,
+        opt_gap::Float64 = VAL_TOL,
+        min_phi::Float64 = -VAL_INF,
+        max_cut_coef::Float64 = VAL_INF, # for numerical stability
+        tol_aux_feas::Float64 = VAL_TOL, # for numerical stability (unused here, kept for parity)
+        init_weight::Float64 = DEFAULT_INIT_WEIGHT,
+        min_weight::Float64 = DEFAULT_MIN_WEIGHT,
+        serious_ratio::Float64 = DEFAULT_SERIOUS_RATIO,
+        tight_ratio::Float64 = DEFAULT_TIGHT_RATIO,
+        mom_solver = DEFAULT_SDP,
+        cut_evaluator = nothing,
+        print::Int = 1
+    )::MainSolution where T <: SampleSubproblem
+    # validate proximal bundle parameters
+    if !(0.0 < serious_ratio < 0.5) || !(serious_ratio < tight_ratio < 1.0) ||
+            init_weight <= 0.0 || min_weight <= 0.0
+        error("Invalid proximal bundle parameters: require 0 < serious_ratio < 0.5 < tight_ratio < 1, init_weight > 0, min_weight > 0.")
+    end
+    # `cut_evaluator` lets the caller swap the inner-supremum solver used to
+    # generate cuts for `MainProblem.ϕ`. When `nothing`, fall back to the
+    # moment-relaxation evaluator with the supplied `mom_solver` (default).
+    eval_cut = isnothing(cut_evaluator) ?
+        (subproblem, augstate, samples, wassinfo; print=0) ->
+            eval_moment_Wass(subproblem, augstate, samples, wassinfo;
+                             mom_solver=mom_solver, print=print) :
+        cut_evaluator
+    # check if Wasserstein ambiguity is needed
+    flag_Wass = wassinfo.r > VAL_TOL
+    # get the state dimension and set up the linear objective expression
+    dim_x = length(main.x)
+    obj = main.f_x'*main.x + main.f_u'*main.u + main.ϕ
+    set_lower_bound(main.ϕ, min_phi)
+    # find the initial stability center by solving the model without cuts
+    @objective(main.model, Min, obj)
+    optimize!(main.model)
+    cen_x = round.(value.(main.x), digits=NUM_DIG)
+    cen_u = round.(value.(main.u), digits=NUM_DIG)
+    cen_w = flag_Wass ? round(value(main.w), digits=NUM_DIG) : 0.0
+    # generate the initial cut at the stability center
+    cut = zeros(dim_x + 2)
+    if flag_Wass
+        cut = eval_cut(subproblem, [cen_x;cen_w], samples, wassinfo, print=print-1)
+        if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef
+            error("The moment relaxation is infeasible at the initial Wasserstein dual variable; supply a feasible starting point or use the level method.")
+        end
+    else
+        cut[1:dim_x+1] = eval_nominal(subproblem, cen_x, samples)
+    end
+    cut = round.(cut, digits=NUM_DIG)
+    cen_val_f = main.f_x'*cen_x + main.f_u'*cen_u
+    cen_val_ϕ = cut'*[1;cen_x;cen_w]
+    cen_obj = cen_val_f + cen_val_ϕ
+    # add the initial cut to the polyhedral approximation
+    @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
+    # initialize the best solution and the proximal weight
+    opt_x = cen_x
+    opt_u = cen_u
+    opt_f = cen_val_f
+    opt_ϕ = cen_val_ϕ
+    weight = init_weight
+    # print the starting message
+    if print >= 0
+        println(" Start the proximal bundle method for the main problem...")
+        printfmtln(" The initial center objective = {:<6.4e}", cen_obj)
+        if flag_Wass
+            println(" The initial Wasserstein dual variable = ", cen_w)
+        end
+    end
+    iter = 1
+    while iter <= max_iter
+        # Step 1 (Direction finding): solve the proximal QP to obtain y^{k+1}
+        prox_obj = obj + (weight/2) * sum((main.x[i] - cen_x[i])^2 for i in 1:dim_x)
+        if flag_Wass
+            prox_obj += (weight/2) * (main.w - cen_w)^2
+        end
+        @objective(main.model, Min, prox_obj)
+        optimize!(main.model)
+        if termination_status(main.model) != OPTIMAL && !has_values(main.model)
+            if print >= 0
+                println("DEBUG: the proximal bundle direction step runs into issues...\n",
+                        solution_summary(main.model,verbose=true))
+                println("DEBUG: the current stability center x = ", cen_x)
+                if flag_Wass
+                    println("DEBUG: the current stability center w = ", cen_w)
+                end
+            end
+            error("The proximal bundle direction step has failed with status: ", termination_status(main.model))
+        end
+        sol_x = round.(value.(main.x), digits=NUM_DIG)
+        sol_u = round.(value.(main.u), digits=NUM_DIG)
+        sol_w = flag_Wass ? round(value(main.w), digits=NUM_DIG) : 0.0
+        sol_phi_model = value(main.ϕ)
+        sol_val_f = main.f_x'*sol_x + main.f_u'*sol_u
+        f_hat_trial = sol_val_f + sol_phi_model
+        # the predicted descent v^k = f̂(y^{k+1}) - f(x^k) is non-positive
+        v_k = f_hat_trial - cen_obj
+        # Step 2 (Stopping criterion): v^k ≥ -opt_gap (scaled by |cen_obj|)
+        if v_k >= -opt_gap * max(1, abs(cen_obj))
+            if print >= 0
+                printfmtln(" The proximal bundle method has converged at iteration {} with predicted descent = {:<6.2e}",
+                           iter, v_k)
+            end
+            break
+        end
+        # Step 4 (Linearization updating, partial): evaluate the true f at y^{k+1}
+        # and generate a new cut at that point
+        cut = zeros(dim_x + 2)
+        cut_valid = true
+        if flag_Wass
+            cut = eval_cut(subproblem, [sol_x;sol_w], samples, wassinfo, print=print-1)
+            if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef
+                cut_valid = false
+            end
+        else
+            cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
+        end
+        if !cut_valid
+            # cut generation failed: treat as null step and raise the weight to
+            # pull the next trial closer to the (feasible) stability center
+            weight = min(weight * 10, VAL_INF)
+            if print >= 0
+                printfmtln(" Iteration {} (null step, cut failed): raising weight to {:<6.2e}",
+                           iter, weight)
+            end
+            iter += 1
+            continue
+        end
+        cut = round.(cut, digits=NUM_DIG)
+        val_ϕ_trial = cut'*[1;sol_x;sol_w]
+        f_trial = sol_val_f + val_ϕ_trial
+        # add the new cut to the polyhedral approximation of ϕ
+        @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
+        # track the best solution encountered so far
+        if f_trial < opt_f + opt_ϕ
+            opt_x = sol_x
+            opt_u = sol_u
+            opt_f = sol_val_f
+            opt_ϕ = val_ϕ_trial
+        end
+        # Step 3 (Descent test): serious step if (2.3) holds, null step otherwise
+        if f_trial <= cen_obj + serious_ratio * v_k
+            # Step 5 (Weight updating, serious step): decrease the weight if (2.12) holds
+            if f_trial <= cen_obj + tight_ratio * v_k
+                weight = max(weight / 2, min_weight)
+            end
+            # update the stability center
+            cen_x = sol_x
+            cen_u = sol_u
+            cen_w = sol_w
+            cen_obj = f_trial
+            cen_val_f = sol_val_f
+            cen_val_ϕ = val_ϕ_trial
+            if print >= 0
+                printfmtln(" Iteration {} (serious step): center objective = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",
+                           iter, cen_obj, v_k, weight)
+            end
+        else
+            # Step 5 (Weight updating, null step): increase the weight if (2.17) holds.
+            # The linearization error of ϕ at the center, using the new cut, is
+            # α = ϕ(cen) - (cut at trial)(cen), which is ≥ 0 by convexity.
+            alpha_ϕ = cen_val_ϕ - cut'*[1;cen_x;cen_w]
+            if alpha_ϕ > -10 * v_k
+                weight = min(weight * 2, VAL_INF)
+            end
+            if print >= 0
+                printfmtln(" Iteration {} (null step): trial value = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",
+                           iter, f_trial, v_k, weight)
+            end
+        end
+        iter += 1
+    end
+    if iter > max_iter && print >= 0
+        printfmtln(" The proximal bundle method does not converge within {} iterations", max_iter)
     end
     return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
 end

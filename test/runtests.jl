@@ -7,6 +7,7 @@ include("./noncvx.jl")
 
 @testset "MoWDRO.jl" begin
     test_level_quadratic()
+    test_proximal_quadratic()
     test_moment_polynomial_loss()
     test_moment_linear_recourse()
     test_noncvx_polynomial_loss()

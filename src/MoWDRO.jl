@@ -15,7 +15,7 @@ const DEFAULT_NCVX = SCIP.Optimizer
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo
 export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
-export solve_main_level, eval_nominal, eval_moment_Wass
+export solve_main_level, solve_main_proximal, eval_nominal, eval_moment_Wass
 export solve_two_stage_copos, eval_noncvx_Wass
 
 # define module-wide shared parameters
@@ -31,7 +31,7 @@ include("methods.jl")
 
 # include algorithms and relaxations
 include("moment_relax.jl")
-include("level_bundle.jl")
+include("bundle.jl")
 
 # include baseline reformulations
 include("baseline/copos_form.jl")

@@ -1,13 +1,13 @@
 [experiment]
-"training sample sweeps"  = [{ start = 40, stop = 200, step = 20 }]
+"training sample sweeps"  = [{ start = 40, stop = 400, step = 40 }]
 "testing sample size"     = 10000
 "target optimality gap"   = 1.0e-4
-"Wasserstein dual min"    = 1.0
-"Wasserstein dual max"    = 1.0e4
+"Wasserstein dual min"    = 0.0
+"Wasserstein dual max"    = 2.0e3
 "loss lower bound"        = 0.0
 "maximum cut coefficient" = 1.0e4
 "baseline method"         = "none"
-"radius scaling"          = 5
+"radius scaling"          = 2 # 5 - same as the number of variables
 "random seed"             = 97  # allowed: integer (e.g. 42) | "none" for fresh random seeding
 "Wasserstein order"       = 4
 "Wasserstein radii"       = [0.0, 1.0e-2, 5.0e-2, 1.0e-1, 5.0e-1, 1.0]
