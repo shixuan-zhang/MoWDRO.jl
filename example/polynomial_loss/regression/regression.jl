@@ -134,7 +134,7 @@ function experiment_regression(
     # define the loss function (scaled with n for numerical stability)
     n = length(A)
     @polyvar x[1:n] ξ[1:(m+1)] # ξ = (z,v)
-    F = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2 / n 
+    F = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2 / (sparse_prob*n) 
     ∇ₓF = differentiate(F,x)
     Ξ = basicsemialgebraicset(FullSpace(), if support_set == "orthant"
                                     [ξ[i] + 0.0 for i in 1:m]
@@ -197,6 +197,9 @@ function experiment_regression(
             w = @variable(model, w >= 0, base_name="w")
             ϕ = @variable(model, ϕ >= 0, base_name="ϕ")
             main = MainProblem(model, x, VariableRef[], w, ϕ, zeros(n), Float64[])
+            # set the Wasserstein dual variable feasibility tolerance 
+            # relative to the optimality gap
+            tol_aux_feas = OPT_GAP / (2*wass_r^wass_order)
             # solve the problem
             time_start = time()
             sol = solve_main_level(main,
@@ -209,6 +212,7 @@ function experiment_regression(
                                    min_aux=MIN_AUX,
                                    min_phi=MIN_PHI,
                                    max_cut_coef=MAX_CUT_COEF,
+                                   tol_aux_feas=tol_aux_feas,
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
