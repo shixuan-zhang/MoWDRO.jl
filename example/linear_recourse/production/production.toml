@@ -13,7 +13,7 @@
 
 [problem]
 "number of parts"         = 20
-"number of products"      = 20
+"number of products"      = 10
 "minimum price"           = 2.0
 "maximum price"           = 5.0
 "minimum cost"            = 1.0
