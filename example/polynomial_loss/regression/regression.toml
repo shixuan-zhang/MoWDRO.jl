@@ -3,7 +3,7 @@
 "testing sample size"     = 10000
 "target optimality gap"   = 1.0e-4
 "Wasserstein dual min"    = 0.0
-"Wasserstein dual max"    = 2.0e3
+"Wasserstein dual max"    = 1.0e6
 "loss lower bound"        = 0.0
 "maximum cut coefficient" = 1.0e4
 "baseline method"         = "none"

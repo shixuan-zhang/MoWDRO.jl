@@ -7,7 +7,7 @@ const DEFAULT_LEVEL = 1/(2+sqrt(2))
 
 # default parameters for the proximal bundle method (Kiwiel, Math. Prog. 1990)
 const DEFAULT_INIT_WEIGHT   = 1.0
-const DEFAULT_MIN_WEIGHT    = 1.0e-6
+const DEFAULT_MIN_WEIGHT    = 1.0e-8
 const DEFAULT_SERIOUS_RATIO = 0.1
 const DEFAULT_TIGHT_RATIO   = 0.5
 const DEFAULT_WEIGHT_UPDATE = 2
@@ -308,9 +308,9 @@ function solve_main_proximal(
     # find the initial stability center by solving the model without cuts
     @objective(main.model, Min, obj)
     optimize!(main.model)
-    ctr_x = round.(value.(main.x), digits=NUM_DIG)
-    ctr_u = round.(value.(main.u), digits=NUM_DIG)
-    ctr_w = flag_Wass ? round(value(main.w), digits=NUM_DIG) : 0.0
+    ctr_x = value.(main.x)
+    ctr_u = value.(main.u)
+    ctr_w = flag_Wass ? value(main.w) : 0.0
     # generate the initial cut at the stability center
     cut = zeros(dim_x + 2)
     if flag_Wass
@@ -323,7 +323,6 @@ function solve_main_proximal(
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, ctr_x, samples)
     end
-    cut = round.(cut, digits=NUM_DIG)
     ctr_val_f = main.f_x'*ctr_x + main.f_u'*ctr_u
     ctr_val_ϕ = cut'*[1;ctr_x;ctr_w]
     ctr_obj = ctr_val_f + ctr_val_ϕ
@@ -352,7 +351,7 @@ function solve_main_proximal(
         end
         @objective(main.model, Min, prox_obj)
         optimize!(main.model)
-        if termination_status(main.model) != OPTIMAL && !has_values(main.model)
+        if termination_status(main.model) != OPTIMAL || !has_values(main.model)
             if print >= 0
                 println("DEBUG: the proximal bundle direction step runs into issues...\n",
                         solution_summary(main.model,verbose=true))
@@ -363,19 +362,23 @@ function solve_main_proximal(
             end
             error("The proximal bundle direction step has failed with status: ", termination_status(main.model))
         end
-        sol_x = round.(value.(main.x), digits=NUM_DIG)
-        sol_u = round.(value.(main.u), digits=NUM_DIG)
-        sol_w = flag_Wass ? round(value(main.w), digits=NUM_DIG) : 0.0
+        sol_x = value.(main.x)
+        sol_u = value.(main.u)
+        sol_w = flag_Wass ? value(main.w) : 0.0
         sol_phi_model = value(main.ϕ)
         sol_val_f = main.f_x'*sol_x + main.f_u'*sol_u
         f_hat_trial = sol_val_f + sol_phi_model
         # the predicted descent v^k = f̂(y^{k+1}) - f(x^k) is non-positive
         v_k = f_hat_trial - ctr_obj
-        # Step 2 (Stopping criterion): v^k ≥ -opt_gap (scaled by |ctr_obj|)
-        if v_k >= -opt_gap * max(1, abs(ctr_obj))
+        if v_k > VAL_TOL
+            printfmtln("DEBUG: the proximal bundle predicted descent v^k = {:<6.2e} is positive", v_k)
+        end
+        # Step 2 (Stopping criterion): estimated gap <= opt_gap (scaled by |ctr_obj|) / [(max_aux-min_aux)^2 ⋅ sol_u]
+        est_gap = abs(v_k) + (max_aux-min_aux)*sqrt(weight*abs(v_k))
+        if est_gap <= opt_gap * max(1,abs(ctr_obj))
             if print >= 0
-                printfmtln(" The proximal bundle method has converged at iteration {} with predicted descent = {:<6.2e}",
-                           iter, v_k)
+                printfmtln(" The proximal bundle method has converged at iteration {} with estimated gap = {:<6.2e}",
+                           iter, est_gap)
             end
             break
         end
@@ -402,7 +405,6 @@ function solve_main_proximal(
             iter += 1
             continue
         end
-        cut = round.(cut, digits=NUM_DIG)
         val_ϕ_trial = cut'*[1;sol_x;sol_w]
         f_trial = sol_val_f + val_ϕ_trial
         # add the new cut to the polyhedral approximation of ϕ

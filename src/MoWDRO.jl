@@ -19,7 +19,7 @@ export solve_main_level, solve_main_proximal, eval_nominal, eval_moment_Wass
 export solve_two_stage_copos, eval_noncvx_Wass
 
 # define module-wide shared parameters
-const NUM_DIG = 6
+const NUM_DIG = 9
 const VAL_TOL = 1.0e-6
 const VAL_INF = 1.0e8
 const NUM_MAX_ITER = 1000
