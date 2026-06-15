@@ -7,9 +7,12 @@ const DEFAULT_LEVEL = 1/(2+sqrt(2))
 
 # default parameters for the proximal bundle method (Kiwiel, Math. Prog. 1990)
 const DEFAULT_INIT_WEIGHT   = 1.0
-const DEFAULT_MIN_WEIGHT    = 1.0e-10
+const DEFAULT_MIN_WEIGHT    = 1.0e-6
 const DEFAULT_SERIOUS_RATIO = 0.1
 const DEFAULT_TIGHT_RATIO   = 0.5
+const DEFAULT_WEIGHT_UPDATE = 2
+const WEIGHT_UPDATE_FEAS    = 10
+const WEIGHT_INCREASE_THRES = 10
 
 # helper function for the level bundle method which finds a feasible w 
 # through bisection and returns the cut together with the updated w
@@ -259,7 +262,7 @@ function solve_main_level(
 end
 
 # function implementing a proximal bundle method (Kiwiel, Math. Prog. 1990, Algorithm 2.1)
-# to solve the main problem. The stability center (cen_x, cen_w) is updated by
+# to solve the main problem. The stability center (ctr_x, ctr_w) is updated by
 # either a "serious step" or kept by a "null step", based on the descent test
 # f(y^{k+1}) ≤ f(x^k) + m_L⋅v^k, where y^{k+1} is the proximal QP solution
 # and v^k = f̂(y^{k+1}) - f(x^k) is the predicted descent of the polyhedral model.
@@ -270,13 +273,15 @@ function solve_main_proximal(
         wassinfo::WassInfo = WassInfo(.0,2);
         max_iter::Int = NUM_MAX_ITER,
         opt_gap::Float64 = VAL_TOL,
+        max_aux::Float64 = VAL_INF, # maximum value for feasibility search of initial Wasserstein dual 
+        min_aux::Float64 = 0.0,     # minimum value for feasibility search of initial Wasserstein dual 
         min_phi::Float64 = -VAL_INF,
-        max_cut_coef::Float64 = VAL_INF, # for numerical stability
-        tol_aux_feas::Float64 = VAL_TOL, # for numerical stability (unused here, kept for parity)
-        init_weight::Float64 = DEFAULT_INIT_WEIGHT,
-        min_weight::Float64 = DEFAULT_MIN_WEIGHT,
+        max_cut_coef::Float64  = VAL_INF, # for numerical stability
+        tol_aux_feas::Float64  = VAL_TOL, # for numerical stability 
+        init_weight::Float64   = DEFAULT_INIT_WEIGHT,
+        min_weight::Float64    = DEFAULT_MIN_WEIGHT,
         serious_ratio::Float64 = DEFAULT_SERIOUS_RATIO,
-        tight_ratio::Float64 = DEFAULT_TIGHT_RATIO,
+        tight_ratio::Float64   = DEFAULT_TIGHT_RATIO,
         mom_solver = DEFAULT_SDP,
         cut_evaluator = nothing,
         print::Int = 1
@@ -303,45 +308,47 @@ function solve_main_proximal(
     # find the initial stability center by solving the model without cuts
     @objective(main.model, Min, obj)
     optimize!(main.model)
-    cen_x = round.(value.(main.x), digits=NUM_DIG)
-    cen_u = round.(value.(main.u), digits=NUM_DIG)
-    cen_w = flag_Wass ? round(value(main.w), digits=NUM_DIG) : 0.0
+    ctr_x = round.(value.(main.x), digits=NUM_DIG)
+    ctr_u = round.(value.(main.u), digits=NUM_DIG)
+    ctr_w = flag_Wass ? round(value(main.w), digits=NUM_DIG) : 0.0
     # generate the initial cut at the stability center
     cut = zeros(dim_x + 2)
     if flag_Wass
-        cut = eval_cut(subproblem, [cen_x;cen_w], samples, wassinfo, print=print-1)
+        cut = eval_cut(subproblem, [ctr_x;ctr_w], samples, wassinfo, print=print-1)
         if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef
-            error("The moment relaxation is infeasible at the initial Wasserstein dual variable; supply a feasible starting point or use the level method.")
+            cut, ctr_w = bisection_feas_cut(subproblem, samples, wassinfo, ctr_x, ctr_w, eval_cut, 
+                                            max_aux=max_aux, min_aux=min_aux, feas_tol=tol_aux_feas, 
+                                            coef_max=max_cut_coef, print=print)
         end
     else
-        cut[1:dim_x+1] = eval_nominal(subproblem, cen_x, samples)
+        cut[1:dim_x+1] = eval_nominal(subproblem, ctr_x, samples)
     end
     cut = round.(cut, digits=NUM_DIG)
-    cen_val_f = main.f_x'*cen_x + main.f_u'*cen_u
-    cen_val_ϕ = cut'*[1;cen_x;cen_w]
-    cen_obj = cen_val_f + cen_val_ϕ
+    ctr_val_f = main.f_x'*ctr_x + main.f_u'*ctr_u
+    ctr_val_ϕ = cut'*[1;ctr_x;ctr_w]
+    ctr_obj = ctr_val_f + ctr_val_ϕ
     # add the initial cut to the polyhedral approximation
     @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
     # initialize the best solution and the proximal weight
-    opt_x = cen_x
-    opt_u = cen_u
-    opt_f = cen_val_f
-    opt_ϕ = cen_val_ϕ
+    opt_x = ctr_x
+    opt_u = ctr_u
+    opt_f = ctr_val_f
+    opt_ϕ = ctr_val_ϕ
     weight = init_weight
     # print the starting message
     if print >= 0
         println(" Start the proximal bundle method for the main problem...")
-        printfmtln(" The initial center objective = {:<6.4e}", cen_obj)
+        printfmtln(" The initial center objective = {:<6.4e}", ctr_obj)
         if flag_Wass
-            println(" The initial Wasserstein dual variable = ", cen_w)
+            println(" The initial Wasserstein dual variable = ", ctr_w)
         end
     end
     iter = 1
     while iter <= max_iter
         # Step 1 (Direction finding): solve the proximal QP to obtain y^{k+1}
-        prox_obj = obj + (weight/2) * sum((main.x[i] - cen_x[i])^2 for i in 1:dim_x)
+        prox_obj = obj + (weight/2) * sum((main.x[i] - ctr_x[i])^2 for i in 1:dim_x)
         if flag_Wass
-            prox_obj += (weight/2) * (main.w - cen_w)^2
+            prox_obj += (weight/2) * (main.w - ctr_w)^2
         end
         @objective(main.model, Min, prox_obj)
         optimize!(main.model)
@@ -349,9 +356,9 @@ function solve_main_proximal(
             if print >= 0
                 println("DEBUG: the proximal bundle direction step runs into issues...\n",
                         solution_summary(main.model,verbose=true))
-                println("DEBUG: the current stability center x = ", cen_x)
+                println("DEBUG: the current stability center x = ", ctr_x)
                 if flag_Wass
-                    println("DEBUG: the current stability center w = ", cen_w)
+                    println("DEBUG: the current stability center w = ", ctr_w)
                 end
             end
             error("The proximal bundle direction step has failed with status: ", termination_status(main.model))
@@ -363,9 +370,9 @@ function solve_main_proximal(
         sol_val_f = main.f_x'*sol_x + main.f_u'*sol_u
         f_hat_trial = sol_val_f + sol_phi_model
         # the predicted descent v^k = f̂(y^{k+1}) - f(x^k) is non-positive
-        v_k = f_hat_trial - cen_obj
-        # Step 2 (Stopping criterion): v^k ≥ -opt_gap (scaled by |cen_obj|)
-        if v_k >= -opt_gap * max(1, abs(cen_obj))
+        v_k = f_hat_trial - ctr_obj
+        # Step 2 (Stopping criterion): v^k ≥ -opt_gap (scaled by |ctr_obj|)
+        if v_k >= -opt_gap * max(1, abs(ctr_obj))
             if print >= 0
                 printfmtln(" The proximal bundle method has converged at iteration {} with predicted descent = {:<6.2e}",
                            iter, v_k)
@@ -387,7 +394,7 @@ function solve_main_proximal(
         if !cut_valid
             # cut generation failed: treat as null step and raise the weight to
             # pull the next trial closer to the (feasible) stability center
-            weight = min(weight * 10, VAL_INF)
+            weight = min(weight * WEIGHT_UPDATE_FEAS, VAL_INF)
             if print >= 0
                 printfmtln(" Iteration {} (null step, cut failed): raising weight to {:<6.2e}",
                            iter, weight)
@@ -408,29 +415,32 @@ function solve_main_proximal(
             opt_ϕ = val_ϕ_trial
         end
         # Step 3 (Descent test): serious step if (2.3) holds, null step otherwise
-        if f_trial <= cen_obj + serious_ratio * v_k
+        if f_trial <= ctr_obj + serious_ratio * v_k
             # Step 5 (Weight updating, serious step): decrease the weight if (2.12) holds
-            if f_trial <= cen_obj + tight_ratio * v_k
-                weight = max(weight / 2, min_weight)
+            if f_trial <= ctr_obj + tight_ratio * v_k
+                weight = max(weight / DEFAULT_WEIGHT_UPDATE, min_weight)
             end
             # update the stability center
-            cen_x = sol_x
-            cen_u = sol_u
-            cen_w = sol_w
-            cen_obj = f_trial
-            cen_val_f = sol_val_f
-            cen_val_ϕ = val_ϕ_trial
+            ctr_x = sol_x
+            ctr_u = sol_u
+            ctr_w = sol_w
+            ctr_obj = f_trial
+            ctr_val_f = sol_val_f
+            ctr_val_ϕ = val_ϕ_trial
             if print >= 0
-                printfmtln(" Iteration {} (serious step): center objective = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",
-                           iter, cen_obj, v_k, weight)
+                printfmtln(" Iteration {} (serious step): center value = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",
+                           iter, ctr_obj, v_k, weight)
+                if print >= 1
+                    println("  The current Wasserstein dual variable = ", ctr_w)
+                end
             end
         else
             # Step 5 (Weight updating, null step): increase the weight if (2.17) holds.
             # The linearization error of ϕ at the center, using the new cut, is
-            # α = ϕ(cen) - (cut at trial)(cen), which is ≥ 0 by convexity.
-            alpha_ϕ = cen_val_ϕ - cut'*[1;cen_x;cen_w]
-            if alpha_ϕ > -10 * v_k
-                weight = min(weight * 2, VAL_INF)
+            # α = ϕ(center) - (cut at trial)(center), which is ≥ 0 by convexity.
+            alpha_ϕ = ctr_val_ϕ - cut'*[1;ctr_x;ctr_w]
+            if alpha_ϕ > -WEIGHT_INCREASE_THRES * v_k
+                weight = min(weight * DEFAULT_WEIGHT_UPDATE, VAL_INF)
             end
             if print >= 0
                 printfmtln(" Iteration {} (null step): trial value = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",

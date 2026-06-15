@@ -203,7 +203,7 @@ function experiment_regression(
             tol_aux_feas = min(OPT_GAP / (2*wass_r^wass_order), 1)
             # solve the problem
             time_start = time()
-            sol = solve_main_level(main,
+            sol = solve_main_proximal(main,
                                    loss,
                                    sample_train,
                                    wassinfo,
