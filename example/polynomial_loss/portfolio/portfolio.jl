@@ -47,6 +47,7 @@ MIN_PHI        = Float64(EXP_CFG["loss lower bound"])
 BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
+NUM_REPS       = parse_num_reps(EXP_CFG)
 WASS_RADII     = parse_wass_radii(EXP_CFG)
 
 # bind problem-specific settings from [problem]
@@ -72,6 +73,7 @@ function experiment_portfolio(
         f_x::Vector{Float64} = zeros(0),            # linear-cost coefficients
         baseline::String = BASELINE,                # baseline method to compare against
         radius_scaling::Int = RADIUS_SCALING,       # s in r/(N/N_min)^(1/s); s ≤ 0 disables scaling
+        num_reps::Int = NUM_REPS,                   # number of independent replications
     )
     baseline in ("none", "noncvx") || error(
         "baseline must be one of \"none\", \"noncvx\"; got \"$baseline\""
@@ -107,11 +109,15 @@ function experiment_portfolio(
             D[:,i] ./= norm(D[:,i])
         end
     end
-    # take the samples of the uncertainty (draw the largest training set once,
-    # then later iterations reuse a strict prefix of it)
+    # take the samples of the uncertainty; pre-draw one full N_max-sized
+    # training set per replication, so each rep gets independent training
+    # data while all per-rep slices of size N share the same prefix.
     N_max = maximum(train_sizes)
-    sample_train_full = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:N_max])
-    sample_test       = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:test_size])
+    sample_train_full_per_rep = [
+        map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:N_max])
+        for _ in 1:num_reps
+    ]
+    sample_test = map(η->min.(max.(D*η,0),1), [rand(m) for _ in 1:test_size])
     # randomly generate the linear objective function if not supplied
     if length(f_x) != n
         f_x = rand(n)
@@ -137,6 +143,7 @@ function experiment_portfolio(
     WASS_RAD   = Float64[]
     WASS_DEG   = Int[]
     WASS_IDX   = Int[]
+    REP_IDX    = Int[]
     TRAIN_SIZE = Int[]
     TRAIN_OBJ  = Float64[]
     TRAIN_TIME = Float64[]
@@ -155,11 +162,16 @@ function experiment_portfolio(
         NCVX_Q90   = Float64[]
         NCVX_Q10   = Float64[]
     end
-    # loop over all (training-sample size, Wasserstein radius) combinations
+    # loop over all (training-sample size, replication, Wasserstein radius)
+    # combinations. `train_sizes` stays outermost so the script works
+    # through smaller training sizes to larger ones overall; for each N we
+    # cycle through every replication before moving on to the next N.
     N_min = minimum(train_sizes)
     for N in train_sizes
-        sample_train = sample_train_full[1:N]
-        for (radius_idx, wass_r) in enumerate(wass_radii)
+        for rep in 1:num_reps
+            println("=== N = $N, replication $rep / $num_reps ===")
+            sample_train = sample_train_full_per_rep[rep][1:N]
+            for (radius_idx, wass_r) in enumerate(wass_radii)
             # auto-scale the Wasserstein radius by (N/N_min)^(1/s), where
             # s = radius_scaling; s ≤ 0 disables scaling. `radius_idx` is
             # the 1-based position of `wass_r` in the original `wass_radii`
@@ -206,6 +218,7 @@ function experiment_portfolio(
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
             append!(WASS_IDX, radius_idx)
+            append!(REP_IDX, rep)
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
@@ -263,9 +276,10 @@ function experiment_portfolio(
                 println("  Nonconvex baseline test mean  = ", mean(vals_NC) + sol_NC.f)
                 println("  Nonconvex baseline test std   = ", std(vals_NC))
             end
-            output = DataFrame(:WASS_DEG   => WASS_DEG,
+            output = DataFrame(:WASS_IDX   => WASS_IDX,
+                               :REP_IDX    => REP_IDX,
+                               :WASS_DEG   => WASS_DEG,
                                :WASS_RAD   => WASS_RAD,
-                               :WASS_IDX   => WASS_IDX,
                                :TRAIN_SIZE => TRAIN_SIZE,
                                :TRAIN_TIME => TRAIN_TIME,
                                :TRAIN_OBJ  => TRAIN_OBJ,
@@ -290,8 +304,9 @@ function experiment_portfolio(
             # Distributed workers leave the main process with a block-
             # buffered stdout when output is piped or redirected.
             flush(stdout)
-        end
-    end
+            end # close for radius_idx
+        end # close for rep
+    end # close for N
 end
 
 
@@ -300,4 +315,5 @@ experiment_portfolio(NUM_VAR, NUM_FAC, DEG_LOSS,
                      WASS_RADII, WASS_ORDER,
                      TRAIN_SIZES, TEST_SIZE;
                      baseline       = BASELINE,
-                     radius_scaling = RADIUS_SCALING)
+                     radius_scaling = RADIUS_SCALING,
+                     num_reps       = NUM_REPS)

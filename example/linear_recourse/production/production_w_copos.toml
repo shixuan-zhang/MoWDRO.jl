@@ -8,6 +8,7 @@
 "baseline method"         = "copos"
 "radius scaling"          = 15
 "random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"number of replications"  = 1
 "Wasserstein order"       = 2
 "Wasserstein radii"       = [0.0, 1.0e-2, 5.0e-2, 1.0e-1]
 

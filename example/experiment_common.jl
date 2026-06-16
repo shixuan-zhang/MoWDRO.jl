@@ -95,3 +95,18 @@ function apply_random_seed!(exp_cfg::AbstractDict)
         error("[experiment] \"random seed\" must be an integer or the string \"none\"; got $(repr(v))")
     end
 end
+
+"""
+    parse_num_reps(exp_cfg) -> Int
+
+Honour the optional `"number of replications"` key under `[experiment]`.
+Accepts a positive integer; defaults to 1 when absent. Errors on any other
+value.
+"""
+function parse_num_reps(exp_cfg::AbstractDict)
+    haskey(exp_cfg, "number of replications") || return 1
+    v = exp_cfg["number of replications"]
+    (v isa Integer && v >= 1) || error(
+        "[experiment] \"number of replications\" must be a positive integer; got $(repr(v))")
+    return Int(v)
+end

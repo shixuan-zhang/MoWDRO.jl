@@ -7,6 +7,7 @@
 "loss lower bound"        = 0.0
 "baseline method"         = "noncvx"
 "radius scaling"          = 0
+"number of replications"  = 1
 "Wasserstein order"       = 4
 "Wasserstein radii"       = [0.0, 1.0e-2, 1.0e-1]
 

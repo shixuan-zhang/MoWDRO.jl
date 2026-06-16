@@ -8,6 +8,7 @@
 "baseline method"         = "all"
 "radius scaling"          = 0
 "random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"number of replications"  = 1
 "Wasserstein order"       = 2
 "Wasserstein radii sweeps" = [
     { start = 0.0, stop = 0.09, step = 0.01 },
