@@ -1,131 +1,151 @@
 #!/usr/bin/env python3
 
-# use system module to obtain the input file and output directory
 import sys, os
-# import modules for parsing and processing
 import pandas as pd
-import numpy as np
 
-# get the command line arguments
 str_input_file = sys.argv[1]
 str_output_dir = './'
 if len(sys.argv) > 2:
     str_output_dir = sys.argv[2]
+if str_output_dir and not str_output_dir.endswith(os.sep):
+    str_output_dir += os.sep
 str_file_name, str_ext_name = os.path.splitext(os.path.basename(str_input_file))
 if str_ext_name != '.csv':
     raise ValueError('unsupported input file format:', str_ext_name)
 
-# parse the data from the csv file
-data = pd.DataFrame(pd.read_csv(str_input_file))
+data = pd.read_csv(str_input_file)
 
-# plot the in-sample training objective values 
-min_rad_increment = data['WASS_RAD'][1] - data['WASS_RAD'][0]
-scale_axis_factor = -round(np.log10(min_rad_increment))
-data_train = data.loc[data['WASS_RAD'] <= [min_rad_increment*i for i in range(len(data['WASS_RAD']))]]
-output_train = r"""\documentclass{standalone}
+mean_cols = ['WASS_RAD', 'TRAIN_TIME', 'TRAIN_OBJ',
+             'TEST_MEAN', 'TEST_STD', 'TEST_Q10', 'TEST_MED', 'TEST_Q90']
+std_cols = ['TRAIN_OBJ', 'TEST_MEAN', 'TEST_STD']
+
+grouped = data.groupby(['TRAIN_SIZE', 'WASS_IDX'])
+agg = grouped[mean_cols].mean()
+for c in std_cols:
+    agg[c + '_SAMPLE_STD'] = grouped[c].std(ddof=1)
+agg = agg.reset_index().sort_values(['TRAIN_SIZE', 'WASS_IDX'])
+
+wass_indices = sorted(agg['WASS_IDX'].unique())
+dro_indices = [w for w in wass_indices if w > 1]
+
+
+def rows_for(wass_idx):
+    return agg[agg['WASS_IDX'] == wass_idx].sort_values('TRAIN_SIZE')
+
+
+def coords_block(rows, ycol, digits=3):
+    lines = []
+    for _, r in rows.iterrows():
+        lines.append(
+            " " * 8 + "(" + str(int(r['TRAIN_SIZE'])) + ","
+            + str(round(float(r[ycol]), digits)) + ")"
+        )
+    return "\n".join(lines) + "\n"
+
+
+eso_rows = rows_for(1)
+
+plot_header = r"""\documentclass{standalone}
 \usepackage{pgfplots,mathpazo}
+\usetikzlibrary{pgfplots.fillbetween}
 \begin{document}
 \begin{tikzpicture}
 \begin{axis}[
     width=16cm,
     height=8cm,
-    xlabel={Wasserstein radius $r$},
-    ylabel={Mean Obj.\ Value},
+    xlabel={Training sample size $n$},
+    ylabel={Obj.\ Value},
     enlargelimits=0.05,
     legend pos=south east,
     ymajorgrids=true,
-    grid style=dashed,""" + "\n"
-if min_rad_increment < 1:
-    output_train += "    scaled x ticks=base 10:" + str(scale_axis_factor) + ",\n"
-output_train += r"""]
-\addplot[color=blue,mark=x]
-    coordinates {""" + "\n"
-for i in range(len(data_train['WASS_RAD'])):
-    output_train += " "*8 + "(" + str(data_train['WASS_RAD'][i]) + ","
-    output_train += str(round(data_train['TRAIN_OBJ'][i],2)) + ")\n"
-output_train += " "*4 + "};\n"
-output_train += r"""    \addlegendentry{in-sample};
-    \addplot[color=red,mark=+]
-    coordinates {""" + "\n"
-for i in range(len(data_train['WASS_RAD'])):
-    output_train += " "*8 + "(" + str(data_train['WASS_RAD'][i]) + ","
-    output_train += str(round(data_train['TEST_MEAN'][i],2)) + ")\n"
-output_train += " "*4 + "};\n"
-output_train += r"""    \addlegendentry{out-of-sample};
-\end{axis}
-\end{tikzpicture}
-\end{document}"""
-with open(str_output_dir+str_file_name+"_train.tex", "w") as file_output:
-    file_output.write(output_train)
-
-
-
-# plot the out-of-sample performance (mean and quantiles)
-min_rad = round(data['WASS_RAD'].values[1],2)
-max_rad = round(data['WASS_RAD'].values[-1],2)
-output_test = r"""\documentclass{standalone}
-\usepackage{pgfplots,mathpazo}
-\usetikzlibrary{pgfplots.fillbetween}
-\begin{document}
-\begin{tikzpicture}
-\begin{semilogxaxis}[
-    width=16cm,
-    height=8cm,
-    xlabel={Wasserstein radius $r$ (log-scale)},
-    ylabel={Obj.\ Value},
-    legend pos=south east,
+    grid style=dashed,
 ]
-    \addplot[color=blue,very thick]
-    coordinates {""" + "\n"
-for i in range(len(data['WASS_RAD'])):
-    output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
-    output_test += str(round(data['TEST_MEAN'][i],2)) + ")\n"
-output_test += " "*4 + "};\n"
-output_test += r"""    \addlegendentry{DRO mean};
-    \addplot[name path=DRO10,color=blue!20,loosely dashed]
-    coordinates {""" + "\n"
-for i in range(len(data['WASS_RAD'])):
-    output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
-    output_test += str(round(data['TEST_Q90'][i],2)) + ")\n"
-output_test += " "*4 + "};\n"
-output_test += r"""    \addlegendentry{DRO 10-90\%};
-    \addplot[name path=DRO90,color=blue!20,loosely dashed,forget plot]
-    coordinates {""" + "\n"
-for i in range(len(data['WASS_RAD'])):
-    output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
-    output_test += str(round(data['TEST_Q10'][i],2)) + ")\n"
-output_test += " "*4 + "};\n"
-output_test += r"""   \addplot[color=blue!20,loosely dashed,forget plot]
-    coordinates {""" + "\n"
-for i in range(len(data['WASS_RAD'])):
-    output_test += " "*8 + "(" + str(data['WASS_RAD'][i]) + ","
-    output_test += str(round(data['TEST_MED'][i],2)) + ")\n"
-output_test += " "*4 + "};\n"
-output_test += r"""    \addplot[blue!10,forget plot] fill between [of=DRO10 and DRO90];
-    \addplot[color=red,very thick,densely dotted]
-    coordinates {
-        (""" + str(min_rad) + "," + str(round(data['TEST_MEAN'][0],2)) + ")\n"
-output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_MEAN'][0],2)) + ")\n"
-output_test += r"""    };
-    \addlegendentry{ESO mean};
-    \addplot[name path=ESO10,color=red!20,loosely dashdotted]
-    coordinates {
-        (""" + str(min_rad) + "," + str(round(data['TEST_Q90'][0],2)) + ")\n"
-output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_Q90'][0],2)) + ")\n"
-output_test += r"""    };
-    \addlegendentry{ESO 10-90\%};
-    \addplot[name path=ESO90,color=red!20,loosely dashdotted,forget plot]
-    coordinates {
-        (""" + str(min_rad) + "," + str(round(data['TEST_Q10'][0],2)) + ")\n"
-output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_Q10'][0],2)) + ")\n"
-output_test += r"""    };
-    \addplot[color=red!20,loosely dashdotted,forget plot]
-    coordinates {
-        (""" + str(min_rad) + "," + str(round(data['TEST_MED'][0],2)) + ")\n"
-output_test += " "*8 + "(" + str(max_rad) + "," + str(round(data['TEST_MED'][0],2)) + ")\n"
-output_test += r"""    };
-\end{semilogxaxis}
+"""
+
+plot_footer = r"""\end{axis}
 \end{tikzpicture}
 \end{document}"""
-with open(str_output_dir+str_file_name+"_test.tex", "w") as file_output:
-    file_output.write(output_test)
+
+for w in dro_indices:
+    k = w - 1
+    dro_rows = rows_for(w)
+    body = ""
+
+    body += "    \\addplot[name path=DRO10_" + str(k) + ",color=blue!20,densely dotted,forget plot]\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q10') + "    };\n"
+    body += "    \\addplot[name path=DRO90_" + str(k) + ",color=blue!20,densely dotted,forget plot]\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q90') + "    };\n"
+    body += ("    \\addplot[blue!10,forget plot] fill between [of=DRO10_"
+             + str(k) + " and DRO90_" + str(k) + "];\n")
+
+    body += "    \\addplot[name path=ESO10_" + str(k) + ",color=red!20,dashdotted,forget plot]\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q10') + "    };\n"
+    body += "    \\addplot[name path=ESO90_" + str(k) + ",color=red!20,dashdotted,forget plot]\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q90') + "    };\n"
+    body += ("    \\addplot[red!10,forget plot] fill between [of=ESO10_"
+             + str(k) + " and ESO90_" + str(k) + "];\n")
+
+    body += "    \\addplot[color=blue,very thick,densely dotted]\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_MEAN') + "    };\n"
+    body += "    \\addlegendentry{DRO test mean ($k=" + str(k) + "$)};\n"
+
+    body += "    \\addplot[color=red,very thick,dashdotted]\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_MEAN') + "    };\n"
+    body += "    \\addlegendentry{ESO test mean};\n"
+
+    body += "    \\addplot[color=blue,solid,mark=x]\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, 'TRAIN_OBJ') + "    };\n"
+    body += "    \\addlegendentry{DRO in-sample obj.\\ ($k=" + str(k) + "$)};\n"
+
+    body += "    \\addplot[color=red,densely dashed,mark=+]\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, 'TRAIN_OBJ') + "    };\n"
+    body += "    \\addlegendentry{ESO in-sample obj.};\n"
+
+    plot_path = str_output_dir + str_file_name + "_" + str(k) + "_plot.tex"
+    with open(plot_path, "w") as f:
+        f.write(plot_header + body + plot_footer)
+
+
+def fmt(v, digits):
+    if pd.isna(v):
+        return "--"
+    return ("{:." + str(digits) + "f}").format(float(v))
+
+
+def fmt_pm(mean, std, digits):
+    if pd.isna(std):
+        return "$" + fmt(mean, digits) + "$"
+    return "$" + fmt(mean, digits) + r" \pm " + fmt(std, digits) + "$"
+
+
+table = r"""\documentclass{standalone}
+\usepackage{booktabs,mathpazo}
+\begin{document}
+\begin{tabular}{rrrrrrr}
+\toprule
+$n$ & $w$ & $r$ & Train Time (s) & Train Obj. & Test Mean & Test Std. \\
+\midrule
+"""
+
+prev_train_size = None
+for _, row in agg.iterrows():
+    ts = int(row['TRAIN_SIZE'])
+    if prev_train_size is not None and ts != prev_train_size:
+        table += "\\midrule\n"
+    prev_train_size = ts
+    table += (
+        str(ts) + " & "
+        + str(int(row['WASS_IDX'])) + " & "
+        + fmt(row['WASS_RAD'], 3) + " & "
+        + fmt(row['TRAIN_TIME'], 1) + " & "
+        + fmt_pm(row['TRAIN_OBJ'], row['TRAIN_OBJ_SAMPLE_STD'], 3) + " & "
+        + fmt_pm(row['TEST_MEAN'], row['TEST_MEAN_SAMPLE_STD'], 3) + " & "
+        + fmt_pm(row['TEST_STD'], row['TEST_STD_SAMPLE_STD'], 3) + r" \\" + "\n"
+    )
+
+table += r"""\bottomrule
+\end{tabular}
+\end{document}"""
+
+with open(str_output_dir + str_file_name + "_table.tex", "w") as f:
+    f.write(table)
