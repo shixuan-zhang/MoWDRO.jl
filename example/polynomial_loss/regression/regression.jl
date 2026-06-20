@@ -273,6 +273,7 @@ function experiment_regression(
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
                     MOI.set(opt, MOI.RawOptimizerAttribute("MIPGap"), 1e-2)
                     MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), 1e-3)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), 600)
                     opt
                 end
                 eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->

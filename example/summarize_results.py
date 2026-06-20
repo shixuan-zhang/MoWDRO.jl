@@ -15,11 +15,18 @@ if str_ext_name != '.csv':
 
 data = pd.read_csv(str_input_file)
 
+cpos_cols = [c for c in data.columns if c.startswith('CPOS_')]
+has_cpos = 'CPOS_TIME' in cpos_cols
+
 mean_cols = ['WASS_RAD', 'TRAIN_TIME', 'TRAIN_OBJ',
              'TEST_MEAN', 'TEST_STD', 'TEST_Q10', 'TEST_MED', 'TEST_Q90']
+mean_cols += cpos_cols
 std_cols = ['TRAIN_OBJ', 'TEST_MEAN', 'TEST_STD']
+if has_cpos:
+    std_cols = std_cols + ['CPOS_OBJ', 'CPOS_MEAN', 'CPOS_STD']
 
 grouped = data.groupby(['TRAIN_SIZE', 'WASS_IDX'])
+single_replication = (grouped.size() <= 1).all()
 agg = grouped[mean_cols].mean()
 for c in std_cols:
     agg[c + '_SAMPLE_STD'] = grouped[c].std(ddof=1)
@@ -53,17 +60,17 @@ plot_preamble = r"""\documentclass{standalone}
 """
 
 
-def axis_open(title_str):
+def axis_open(title_str, ylabel="Obj.\\ Value", legend_pos="north east"):
     return (
         "\\begin{axis}[\n"
         "    width=12cm,\n"
         "    height=8cm,\n"
         "    title={" + title_str + "},\n"
         "    xlabel={Training sample size $N$},\n"
-        "    ylabel={Obj.\\ Value},\n"
+        "    ylabel={" + ylabel + "},\n"
         "    enlarge x limits=0.02,\n"
         "    enlarge y limits=0.05,\n"
-        "    legend pos=north east,\n"
+        "    legend pos=" + legend_pos + ",\n"
         "    legend style={fill=white,fill opacity=0.6,draw opacity=1,text opacity=1},\n"
         "    ymajorgrids=true,\n"
         "    grid style=dashed,\n"
@@ -119,6 +126,34 @@ for w in dro_indices:
     with open(plot_path, "w") as f:
         f.write(plot_preamble + axis_open(title_str) + body + plot_footer)
 
+if has_cpos:
+    cpos_colors = ['red', 'blue', 'green!60!black',
+                   'orange!80!black', 'violet', 'brown']
+    title_str = "Computational time comparison"
+    body = ""
+    for i, w in enumerate(wass_indices):
+        rows = rows_for(w)
+        if rows['CPOS_TIME'].isna().all():
+            continue
+        r0 = float(rows.iloc[0]['WASS_RAD'])
+        r0_str = "{:.3f}".format(r0).rstrip('0').rstrip('.')
+        label = "$(r_0 = " + r0_str + ")$"
+        c = cpos_colors[i % len(cpos_colors)]
+
+        body += "    \\addplot[color=" + c + ",very thick,solid,mark=x]\n"
+        body += "    coordinates {\n" + coords_block(rows, 'TRAIN_TIME', digits=1) + "    };\n"
+        body += "    \\addlegendentry{Mo " + label + "};\n"
+
+        body += "    \\addplot[color=" + c + ",very thick,densely dashed,mark=+]\n"
+        body += "    coordinates {\n" + coords_block(rows, 'CPOS_TIME', digits=1) + "    };\n"
+        body += "    \\addlegendentry{HK " + label + "};\n"
+
+    cpos_plot_path = str_output_dir + str_file_name + "_cpos_plot.tex"
+    with open(cpos_plot_path, "w") as f:
+        f.write(plot_preamble
+                + axis_open(title_str, ylabel="Time (s)", legend_pos="north west")
+                + body + plot_footer)
+
 
 def fmt(v, digits):
     if pd.isna(v):
@@ -132,7 +167,20 @@ def fmt_pm(mean, std, digits):
     return "$" + fmt(mean, digits) + r" \pm " + fmt(std, digits) + "$"
 
 
-table = r"""\documentclass{standalone}
+if has_cpos:
+    table = r"""\documentclass{standalone}
+\usepackage{booktabs,mathpazo}
+\begin{document}
+\begin{tabular}{rrrrrrrrrr}
+\toprule
+ & & \multicolumn{4}{c}{Moment-WDRO} & \multicolumn{4}{c}{Hanasusanto-Kuhn} \\
+\cmidrule(lr){3-6} \cmidrule(lr){7-10}
+$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std.
+     & Time (s) & Training Obj. & Test Mean & Test Std. \\
+\midrule
+"""
+else:
+    table = r"""\documentclass{standalone}
 \usepackage{booktabs,mathpazo}
 \begin{document}
 \begin{tabular}{rrrrrr}
@@ -141,20 +189,35 @@ $N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std. \\
 \midrule
 """
 
+
+def obj_cell(row, mean_col, std_col, digits):
+    if single_replication:
+        return "$" + fmt(row[mean_col], digits) + "$"
+    return fmt_pm(row[mean_col], row[std_col], digits)
+
+
 prev_train_size = None
 for _, row in agg.iterrows():
     ts = int(row['TRAIN_SIZE'])
     if prev_train_size is not None and ts != prev_train_size:
         table += "\\midrule\n"
     prev_train_size = ts
-    table += (
-        str(ts) + " & "
-        + fmt(row['WASS_RAD'], 3) + " & "
-        + fmt(row['TRAIN_TIME'], 1) + " & "
-        + fmt_pm(row['TRAIN_OBJ'], row['TRAIN_OBJ_SAMPLE_STD'], 3) + " & "
-        + fmt_pm(row['TEST_MEAN'], row['TEST_MEAN_SAMPLE_STD'], 3) + " & "
-        + fmt_pm(row['TEST_STD'], row['TEST_STD_SAMPLE_STD'], 3) + r" \\" + "\n"
-    )
+    cells = [
+        str(ts),
+        fmt(row['WASS_RAD'], 3),
+        fmt(row['TRAIN_TIME'], 1),
+        obj_cell(row, 'TRAIN_OBJ', 'TRAIN_OBJ_SAMPLE_STD', 3),
+        obj_cell(row, 'TEST_MEAN', 'TEST_MEAN_SAMPLE_STD', 3),
+        obj_cell(row, 'TEST_STD', 'TEST_STD_SAMPLE_STD', 3),
+    ]
+    if has_cpos:
+        cells += [
+            fmt(row['CPOS_TIME'], 1),
+            obj_cell(row, 'CPOS_OBJ', 'CPOS_OBJ_SAMPLE_STD', 3),
+            obj_cell(row, 'CPOS_MEAN', 'CPOS_MEAN_SAMPLE_STD', 3),
+            obj_cell(row, 'CPOS_STD', 'CPOS_STD_SAMPLE_STD', 3),
+        ]
+    table += " & ".join(cells) + r" \\" + "\n"
 
 table += r"""\bottomrule
 \end{tabular}
