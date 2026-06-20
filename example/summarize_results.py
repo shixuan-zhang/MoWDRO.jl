@@ -45,22 +45,33 @@ def coords_block(rows, ycol, digits=3):
 
 eso_rows = rows_for(1)
 
-plot_header = r"""\documentclass{standalone}
+plot_preamble = r"""\documentclass{standalone}
 \usepackage{pgfplots,mathpazo}
-\usetikzlibrary{pgfplots.fillbetween}
+\usetikzlibrary{pgfplots.fillbetween,patterns}
 \begin{document}
 \begin{tikzpicture}
-\begin{axis}[
-    width=16cm,
-    height=8cm,
-    xlabel={Training sample size $n$},
-    ylabel={Obj.\ Value},
-    enlargelimits=0.05,
-    legend pos=south east,
-    ymajorgrids=true,
-    grid style=dashed,
-]
 """
+
+
+def axis_open(title_str):
+    return (
+        "\\begin{axis}[\n"
+        "    width=12cm,\n"
+        "    height=8cm,\n"
+        "    title={" + title_str + "},\n"
+        "    xlabel={Training sample size $N$},\n"
+        "    ylabel={Obj.\\ Value},\n"
+        "    enlarge x limits=0.02,\n"
+        "    enlarge y limits=0.05,\n"
+        "    legend pos=north east,\n"
+        "    legend style={fill=white,fill opacity=0.6,draw opacity=1,text opacity=1},\n"
+        "    ymajorgrids=true,\n"
+        "    grid style=dashed,\n"
+        "    scaled y ticks=false,\n"
+        "    yticklabel style={/pgf/number format/fixed},\n"
+        "]\n"
+    )
+
 
 plot_footer = r"""\end{axis}
 \end{tikzpicture}
@@ -69,41 +80,44 @@ plot_footer = r"""\end{axis}
 for w in dro_indices:
     k = w - 1
     dro_rows = rows_for(w)
+    r0 = float(dro_rows.iloc[0]['WASS_RAD'])
+    r0_str = "{:.3f}".format(r0).rstrip('0').rstrip('.')
+    title_str = "Initial radius $r_0 = " + r0_str + "$"
     body = ""
 
-    body += "    \\addplot[name path=DRO10_" + str(k) + ",color=blue!20,densely dotted,forget plot]\n"
+    body += "    \\addplot[name path=DRO10_" + str(k) + ",color=blue!50,densely dotted,thick,forget plot]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q10') + "    };\n"
-    body += "    \\addplot[name path=DRO90_" + str(k) + ",color=blue!20,densely dotted,forget plot]\n"
+    body += "    \\addplot[name path=DRO90_" + str(k) + ",color=blue!50,densely dotted,thick,forget plot]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q90') + "    };\n"
-    body += ("    \\addplot[blue!10,forget plot] fill between [of=DRO10_"
-             + str(k) + " and DRO90_" + str(k) + "];\n")
+    body += ("    \\addplot[pattern=north east lines,pattern color=blue!10,forget plot] "
+             "fill between [of=DRO10_" + str(k) + " and DRO90_" + str(k) + "];\n")
 
-    body += "    \\addplot[name path=ESO10_" + str(k) + ",color=red!20,dashdotted,forget plot]\n"
+    body += "    \\addplot[name path=ESO10_" + str(k) + ",color=red!50,dashdotted,thick,forget plot]\n"
     body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q10') + "    };\n"
-    body += "    \\addplot[name path=ESO90_" + str(k) + ",color=red!20,dashdotted,forget plot]\n"
+    body += "    \\addplot[name path=ESO90_" + str(k) + ",color=red!50,dashdotted,thick,forget plot]\n"
     body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q90') + "    };\n"
-    body += ("    \\addplot[red!10,forget plot] fill between [of=ESO10_"
-             + str(k) + " and ESO90_" + str(k) + "];\n")
+    body += ("    \\addplot[pattern=north west lines,pattern color=red!10,forget plot] "
+             "fill between [of=ESO10_" + str(k) + " and ESO90_" + str(k) + "];\n")
 
     body += "    \\addplot[color=blue,very thick,densely dotted]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_MEAN') + "    };\n"
-    body += "    \\addlegendentry{DRO test mean ($k=" + str(k) + "$)};\n"
+    body += "    \\addlegendentry{DRO test mean and 10-90\\% range};\n"
 
     body += "    \\addplot[color=red,very thick,dashdotted]\n"
     body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_MEAN') + "    };\n"
-    body += "    \\addlegendentry{ESO test mean};\n"
+    body += "    \\addlegendentry{ESO test mean and 10-90\\% range};\n"
 
-    body += "    \\addplot[color=blue,solid,mark=x]\n"
+    body += "    \\addplot[color=blue,very thick,solid,mark=x]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TRAIN_OBJ') + "    };\n"
-    body += "    \\addlegendentry{DRO in-sample obj.\\ ($k=" + str(k) + "$)};\n"
+    body += "    \\addlegendentry{DRO training obj.\\ value};\n"
 
-    body += "    \\addplot[color=red,densely dashed,mark=+]\n"
+    body += "    \\addplot[color=red,very thick,densely dashed,mark=+]\n"
     body += "    coordinates {\n" + coords_block(eso_rows, 'TRAIN_OBJ') + "    };\n"
-    body += "    \\addlegendentry{ESO in-sample obj.};\n"
+    body += "    \\addlegendentry{ESO training obj.\\ value};\n"
 
     plot_path = str_output_dir + str_file_name + "_" + str(k) + "_plot.tex"
     with open(plot_path, "w") as f:
-        f.write(plot_header + body + plot_footer)
+        f.write(plot_preamble + axis_open(title_str) + body + plot_footer)
 
 
 def fmt(v, digits):
@@ -121,9 +135,9 @@ def fmt_pm(mean, std, digits):
 table = r"""\documentclass{standalone}
 \usepackage{booktabs,mathpazo}
 \begin{document}
-\begin{tabular}{rrrrrrr}
+\begin{tabular}{rrrrrr}
 \toprule
-$n$ & $w$ & $r$ & Train Time (s) & Train Obj. & Test Mean & Test Std. \\
+$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std. \\
 \midrule
 """
 
@@ -135,7 +149,6 @@ for _, row in agg.iterrows():
     prev_train_size = ts
     table += (
         str(ts) + " & "
-        + str(int(row['WASS_IDX'])) + " & "
         + fmt(row['WASS_RAD'], 3) + " & "
         + fmt(row['TRAIN_TIME'], 1) + " & "
         + fmt_pm(row['TRAIN_OBJ'], row['TRAIN_OBJ_SAMPLE_STD'], 3) + " & "
