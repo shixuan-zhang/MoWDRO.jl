@@ -131,7 +131,7 @@ function _gen_noncvx_cut_polynomial_loss(
     optimize!(model)
     # accept proven-optimal as well as merely feasible solutions
     # (a nonconvex global solver may stop at a time / node limit).
-    if !is_solved_and_feasible(model, allow_almost=true) && !has_values(model)
+    if !is_solved_and_feasible(model, allow_almost=true)
         if print >= 0
             println("DEBUG: nonconvex polynomial-loss subproblem $i did not solve, status: ",
                     termination_status(model))
@@ -261,7 +261,7 @@ function _gen_noncvx_cut_linear_recourse(
     P_expr  = _noncvx_subs_jump(pen_sym, sym_vars, jump_vars)
     @objective(model, Max, F_expr - w̄ * P_expr)
     optimize!(model)
-    if !is_solved_and_feasible(model, allow_almost=true) && !has_values(model)
+    if !is_solved_and_feasible(model, allow_almost=true) 
         if print >= 0
             println("DEBUG: nonconvex linear-recourse subproblem $i did not solve, status: ",
                     termination_status(model))
