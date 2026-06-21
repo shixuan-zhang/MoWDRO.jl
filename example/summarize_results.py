@@ -148,7 +148,7 @@ if has_cpos:
         body += "    coordinates {\n" + coords_block(rows, 'CPOS_TIME', digits=1) + "    };\n"
         body += "    \\addlegendentry{HK " + label + "};\n"
 
-    cpos_plot_path = str_output_dir + str_file_name + "_cpos_plot.tex"
+    cpos_plot_path = str_output_dir + str_file_name + "_time_comparison.tex"
     with open(cpos_plot_path, "w") as f:
         f.write(plot_preamble
                 + axis_open(title_str, ylabel="Time (s)", legend_pos="north west")
