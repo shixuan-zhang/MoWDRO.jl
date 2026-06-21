@@ -138,7 +138,7 @@ function _gen_noncvx_cut_polynomial_loss(
             println("DEBUG: the current main problem solution is\n", x̄)
             println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
         end
-        error("eval_noncvx_Wass: nonconvex inner subproblem failed.")
+        return nothing
     end
     ξ_star = value.(ξ)
     # subgradient at the global maximizer ξ* — formula (2.8) in the paper
@@ -181,6 +181,9 @@ function eval_noncvx_Wass(
                 i, loss, samples, wassinfo, f, ∇f, x̄, w̄, print, noncvx_solver),
         1:N,
     )
+    # if any sample's QCQP solve failed, propagate the same `nothing` that
+    # the original sequential implementation would have returned.
+    any(isnothing, cuts) && return nothing
     return combine_linear_cuts(Vector{Vector{Float64}}(cuts))
 end
 
@@ -265,7 +268,7 @@ function _gen_noncvx_cut_linear_recourse(
             println("DEBUG: the current main problem solution is\n", x̄)
             println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
         end
-        error("eval_noncvx_Wass: nonconvex inner subproblem failed.")
+        return nothing
     end
     ξ_star = value.(ξ)
     y_star = value.(y)
@@ -306,5 +309,8 @@ function eval_noncvx_Wass(
                 n_y, d, print, noncvx_solver, val_add_bound),
         1:N,
     )
+    # if any sample's QCQP solve failed, propagate the same `nothing` that
+    # the original sequential implementation would have returned.
+    any(isnothing, cuts) && return nothing
     return combine_linear_cuts(Vector{Vector{Float64}}(cuts))
 end

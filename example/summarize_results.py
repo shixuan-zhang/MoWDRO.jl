@@ -196,6 +196,8 @@ def obj_cell(row, mean_col, std_col, digits):
     return fmt_pm(row[mean_col], row[std_col], digits)
 
 
+obj_digits = 2 if has_cpos else 3
+
 prev_train_size = None
 for _, row in agg.iterrows():
     ts = int(row['TRAIN_SIZE'])
@@ -206,16 +208,16 @@ for _, row in agg.iterrows():
         str(ts),
         fmt(row['WASS_RAD'], 3),
         fmt(row['TRAIN_TIME'], 1),
-        obj_cell(row, 'TRAIN_OBJ', 'TRAIN_OBJ_SAMPLE_STD', 3),
-        obj_cell(row, 'TEST_MEAN', 'TEST_MEAN_SAMPLE_STD', 3),
-        obj_cell(row, 'TEST_STD', 'TEST_STD_SAMPLE_STD', 3),
+        obj_cell(row, 'TRAIN_OBJ', 'TRAIN_OBJ_SAMPLE_STD', obj_digits),
+        obj_cell(row, 'TEST_MEAN', 'TEST_MEAN_SAMPLE_STD', obj_digits),
+        obj_cell(row, 'TEST_STD', 'TEST_STD_SAMPLE_STD', obj_digits),
     ]
     if has_cpos:
         cells += [
             fmt(row['CPOS_TIME'], 1),
-            obj_cell(row, 'CPOS_OBJ', 'CPOS_OBJ_SAMPLE_STD', 3),
-            obj_cell(row, 'CPOS_MEAN', 'CPOS_MEAN_SAMPLE_STD', 3),
-            obj_cell(row, 'CPOS_STD', 'CPOS_STD_SAMPLE_STD', 3),
+            obj_cell(row, 'CPOS_OBJ', 'CPOS_OBJ_SAMPLE_STD', obj_digits),
+            obj_cell(row, 'CPOS_MEAN', 'CPOS_MEAN_SAMPLE_STD', obj_digits),
+            obj_cell(row, 'CPOS_STD', 'CPOS_STD_SAMPLE_STD', obj_digits),
         ]
     table += " & ".join(cells) + r" \\" + "\n"
 
