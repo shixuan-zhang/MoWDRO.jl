@@ -1,17 +1,20 @@
 # Moment relaxation for the loss and recourse functions
 
-# Per-sample helper that builds and solves one SOS moment-relaxation model
-# for the SamplePolynomialLoss case, returning either the resulting cut
-# (Vector{Float64}) or `nothing` on infeasibility. Called via `pmap` from
-# `eval_moment_Wass`; for true parallel execution the caller must have
-# added workers (e.g. `addprocs(...)`) and loaded MoWDRO on them
+# Per-sample helper that builds and solves the SOS moment-relaxation models
+# for the SamplePolynomialLoss case. When the loss F = max_k F[k] holds K
+# polynomials, this loops over k = 1..K, solves the k-th relaxation, and
+# returns the argmax-k cut. Returns `nothing` on unrecoverable infeasibility
+# for any sub-problem (matching the single-polynomial semantics). Called via
+# `pmap` from `eval_moment_Wass`; for true parallel execution the caller
+# must have added workers (e.g. `addprocs(...)`) and loaded MoWDRO on them
 # (`@everywhere using MoWDRO`).
 function _gen_moment_cut_polynomial_loss(
         i::Int,
         loss::SamplePolynomialLoss,
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo,
-        f,
+        fs::Vector,
+        ∇fs::Vector,
         x̄::Vector{Float64},
         w̄::Float64,
         relaxdeg::Int,
@@ -21,55 +24,85 @@ function _gen_moment_cut_polynomial_loss(
     )
     ξ̂ = samples[i]
     d = length(ξ̂)
-    # define the polynomial objective
+    dim_x = length(x̄)
+    K = length(fs)
+    # Wasserstein penalty polynomial (shared across all F_k)
     p = sum((loss.ξ[j]-ξ̂[j])^wassinfo.p for j=1:d)
-    # define the SOS optimization model
-    model = SOSModel(mom_solver)
-    if print <= 1
-        set_silent(model)
-    end
-    @variable(model, optval)
-    @objective(model, Min, optval)
-    @constraint(model, constr, f-w̄*p <= optval, domain=loss.Ξ, maxdegree=relaxdeg)
-    # solve the SOS model and extract the (pseudo-)moments/measure
-    optimize!(model)
-    # retrieve the pseudo-expectations for the polynomials
-    if is_solved_and_feasible(model, allow_almost=true)
-        μ̄ = moments(constr)
-        v̂ = expectation(μ̄,f)
-        p̂ = expectation(μ̄,p)
-        ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
-        return [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂]
-    elseif termination_status(model) == SLOW_PROGRESS
-        if print >= 0
-            println("DEBUG: slow progress reported by the solver...")
+    # track the argmax-k relaxation value and cut
+    best_val = -Inf
+    best_cut = nothing
+    for k = 1:K
+        f_k = fs[k]
+        # Constant-polynomial shortcut: after substituting x = x̄, f_k has
+        # no ξ dependence. Then sup_{ξ∈Ξ} [c - w̄·p(ξ)] = c (attained at
+        # ξ = ξ̂ where p = 0), so the exact per-sample DRO cut is
+        #   cut = [c; 0; r^p],
+        # equal to c + w̄·r^p at (x̄, w̄) — matching the true contribution
+        # w̄·r^p + sup_ξ (c - w̄·p) identically at every (x̄, w̄).
+        if f_k isa Real || maxdegree(f_k) <= 0
+            c = convert(Float64, f_k)
+            if c > best_val
+                best_val = c
+                best_cut = [c; zeros(dim_x); wassinfo.r^wassinfo.p]
+            end
+            continue
         end
-        μ̄ = moments(constr)
-        v̂ = expectation(μ̄,f)
-        p̂ = expectation(μ̄,p)
-        ĝ = map(m->expectation(μ̄,m), subs.(loss.∇ₓF,loss.x=>x̄))
-        v̄ = objective_value(model)
-        v̂ = v̂-w̄*p̂
-        if abs(v̄-v̂) / (1.0+max(abs(v̄),abs(v̂))) > val_relax_tol
+        # SOS moment relaxation for the k-th polynomial
+        model = SOSModel(mom_solver)
+        if print <= 1
+            set_silent(model)
+        end
+        @variable(model, optval)
+        @objective(model, Min, optval)
+        @constraint(model, constr, f_k-w̄*p <= optval, domain=loss.Ξ, maxdegree=relaxdeg)
+        optimize!(model)
+        val_k = nothing
+        cut_k = nothing
+        if is_solved_and_feasible(model, allow_almost=true)
+            μ̄ = moments(constr)
+            v̂ = expectation(μ̄, f_k)
+            p̂ = expectation(μ̄, p)
+            ĝ = map(m -> expectation(μ̄, m), ∇fs[k])
+            val_k = objective_value(model)
+            cut_k = [v̂-ĝ'*x̄; ĝ; wassinfo.r^wassinfo.p-p̂]
+        elseif termination_status(model) == SLOW_PROGRESS
+            if print >= 0
+                println("DEBUG: slow progress reported by the solver...")
+            end
+            μ̄ = moments(constr)
+            v̂ = expectation(μ̄, f_k)
+            p̂ = expectation(μ̄, p)
+            ĝ = map(m -> expectation(μ̄, m), ∇fs[k])
+            v̄ = objective_value(model)
+            v̂_check = v̂ - w̄*p̂
+            if abs(v̄-v̂_check) / (1.0+max(abs(v̄),abs(v̂_check))) > val_relax_tol
+                if print >= 1
+                    println("DEBUG: The loss function evaluation error is ", v̄-v̂_check)
+                    println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+                    println("DEBUG: the moment relaxation model is\n", model)
+                end
+            end
+            val_k = v̄
+            cut_k = [v̂-ĝ'*x̄; ĝ; wassinfo.r^wassinfo.p-p̂]
+        else
             if print >= 1
-                println("DEBUG: The loss function evaluation error is ", v̄-v̂)
+                println("DEBUG: the moment relaxation degree is ", relaxdeg)
+                println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
+                println("DEBUG: the moment relaxation objective is\n", f_k-w̄*p)
+                println("DEBUG: the current main problem solution is\n", x̄)
                 println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
                 println("DEBUG: the moment relaxation model is\n", model)
+                println("The moment relaxation for polynomial k=", k,
+                        " has failed with status: ", termination_status(model))
             end
+            return nothing
         end
-        return [v̂-ĝ'*x̄;ĝ;wassinfo.r^wassinfo.p-p̂]
-    else
-        if print >= 1
-            println("DEBUG: the moment relaxation degree is ", relaxdeg)
-            println("DEBUG: the moment relaxation domain is\n", loss.Ξ)
-            println("DEBUG: the moment relaxation objective is\n", f-w̄*p)
-            println("DEBUG: the current main problem solution is\n", x̄)
-            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
-            println("DEBUG: the moment relaxation model is\n", model)
-            println("The moment relaxation has failed with status: ", termination_status(model))
+        if val_k > best_val
+            best_val = val_k
+            best_cut = cut_k
         end
-        return nothing
     end
+    return best_cut
 end
 
 # evaluate the moment relaxation for the Wasserstein distributionally
@@ -88,17 +121,25 @@ function eval_moment_Wass(
     # alias the augmented state
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
-    # set the loss function at the given state
-    f = subs(loss.F, loss.x=>x̄)
-    # set the default relaxation degree
+    K = length(loss.F)
+    # specialise each F[k] and ∇ₓF[k] at x = x̄ (polynomials in ξ alone)
+    fs  = [subs(loss.F[k],  loss.x=>x̄) for k in 1:K]
+    ∇fs = [subs.(loss.∇ₓF[k], loss.x=>x̄) for k in 1:K]
+    # set the default relaxation degree — largest across all F_k in ξ
     if relaxdeg <= 0
-        relaxdeg = max(maxdegree(f),wassinfo.p)
+        deg_max = 0
+        for f in fs
+            if !(f isa Real)
+                deg_max = max(deg_max, maxdegree(f))
+            end
+        end
+        relaxdeg = max(deg_max, wassinfo.p)
     end
     # parallelise the per-sample SOS solves; pmap preserves the input
     # index order, so cuts[i] is always the cut for samples[i].
     cuts = pmap(
         i -> _gen_moment_cut_polynomial_loss(
-                i, loss, samples, wassinfo, f, x̄, w̄,
+                i, loss, samples, wassinfo, fs, ∇fs, x̄, w̄,
                 relaxdeg, mom_solver, print, val_relax_tol),
         1:N,
     )

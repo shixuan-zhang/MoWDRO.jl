@@ -73,20 +73,22 @@ function _noncvx_subs_jump(poly, sym_vars::Vector, jump_vars::Vector{VariableRef
 end
 
 
-# Per-sample helper that builds and solves one nonconvex inner subproblem
-# for the SamplePolynomialLoss case, returning the resulting cut. Called
-# via `pmap` from `eval_noncvx_Wass`; for true parallel execution the
-# caller must have added workers (e.g. `addprocs(...)`) and loaded MoWDRO
-# on them (`@everywhere using MoWDRO`). An unsolved subproblem throws an
-# `error(...)` exactly as the original sequential loop did; `pmap`
-# propagates the exception to the caller.
+# Per-sample helper for the SamplePolynomialLoss case with F = max_k F[k]:
+# for the sample i and each polynomial F_k, solve the nonconvex inner
+# maximisation `max_ξ F_k(x̄, ξ) - w̄·‖ξ-ξ̂‖^p` on Ξ, then return the cut
+# from the argmax-k branch. Uses the constant-polynomial shortcut for F_k
+# that no longer depends on ξ after the x=>x̄ substitution. Called via
+# `pmap` from `eval_noncvx_Wass`; for true parallel execution the caller
+# must have added workers (e.g. `addprocs(...)`) and loaded MoWDRO on them
+# (`@everywhere using MoWDRO`). Returns `nothing` if any k-th QCQP fails
+# — same conservative semantics as before.
 function _gen_noncvx_cut_polynomial_loss(
         i::Int,
         loss::SamplePolynomialLoss,
         samples::Vector{Vector{Float64}},
         wassinfo::WassInfo,
-        f,
-        ∇f,
+        fs::Vector,
+        ∇fs::Vector,
         x̄::Vector{Float64},
         w̄::Float64,
         print::Int,
@@ -94,15 +96,9 @@ function _gen_noncvx_cut_polynomial_loss(
     )
     ξ̂ = samples[i]
     d = length(ξ̂)
-    # i-th inner supremum in (1.3):
-    #   max_ξ  F(x̄, ξ) - w̄ · Σ_j (ξ_j - ξ̂^(i)_j)^p
-    #   s.t.   ξ ∈ Ξ
-    # PolyJuMP.QCQP rewrites all degree-≥3 monomials in terms of auxiliary
-    # variables and quadratic equalities, and forwards to `noncvx_solver`.
-    # `PolyJuMP.QCQP.Optimizer` does not forward `MOI.Silent` to the
-    # inner solver, so we cannot use `set_silent(model)` after the fact.
-    # Instead, set the silent flag on the inner solver *before* wrapping
-    # it with `PolyJuMP.QCQP`.
+    dim_x = length(x̄)
+    K = length(fs)
+    # shared PolyJuMP.QCQP.Optimizer factory (silent when print <= 1)
     inner_factory = if print <= 1
         () -> begin
             inner = noncvx_solver()
@@ -112,42 +108,59 @@ function _gen_noncvx_cut_polynomial_loss(
     else
         noncvx_solver
     end
-    model = Model(() -> PolyJuMP.QCQP.Optimizer(inner_factory()))
-    @variable(model, ξ[1:d])
-    # encode Ξ = { ξ : h_j(ξ) ≥ 0 } and any equality part (variety) of Ξ
-    for h in loss.Ξ.p
-        @constraint(model, _noncvx_subs_jump(h, loss.ξ, ξ) >= 0)
-    end
-    if loss.Ξ.V != FullSpace()
-        for h in loss.Ξ.V.I.p
-            @constraint(model, _noncvx_subs_jump(h, loss.ξ, ξ) == 0)
+    # track the argmax-k inner-sup value and the associated cut
+    best_val = -Inf
+    best_cut = nothing
+    for k = 1:K
+        f_k = fs[k]
+        # Constant-polynomial shortcut: sup_{ξ∈Ξ}[c - w̄·p(ξ)] = c at ξ=ξ̂,
+        # so the exact cut is [c; 0; r^p]; skip the QCQP solve entirely.
+        if f_k isa Real || maxdegree(f_k) <= 0
+            c = convert(Float64, f_k)
+            if c > best_val
+                best_val = c
+                best_cut = [c; zeros(dim_x); wassinfo.r^wassinfo.p]
+            end
+            continue
+        end
+        # nonconvex inner maximisation of the k-th branch
+        model = Model(() -> PolyJuMP.QCQP.Optimizer(inner_factory()))
+        @variable(model, ξ[1:d])
+        # encode Ξ = { ξ : h_j(ξ) ≥ 0 } and any equality part (variety) of Ξ
+        for h in loss.Ξ.p
+            @constraint(model, _noncvx_subs_jump(h, loss.ξ, ξ) >= 0)
+        end
+        if loss.Ξ.V != FullSpace()
+            for h in loss.Ξ.V.I.p
+                @constraint(model, _noncvx_subs_jump(h, loss.ξ, ξ) == 0)
+            end
+        end
+        # objective F_k(x̄, ξ) - w̄ ‖ξ - ξ̂‖^p
+        F_expr  = _noncvx_subs_jump(f_k, loss.ξ, ξ)
+        pen_sym = sum((loss.ξ[j] - ξ̂[j])^wassinfo.p for j = 1:d)
+        P_expr  = _noncvx_subs_jump(pen_sym, loss.ξ, ξ)
+        @objective(model, Max, F_expr - w̄ * P_expr)
+        optimize!(model)
+        if !is_solved_and_feasible(model, allow_almost=true)
+            if print >= 0
+                println("DEBUG: nonconvex polynomial-loss subproblem $i (branch k=$k) did not solve, status: ",
+                        termination_status(model))
+                println("DEBUG: the current main problem solution is\n", x̄)
+                println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
+            end
+            return nothing
+        end
+        ξ_star = value.(ξ)
+        v̂ = convert(Float64, subs(f_k, loss.ξ => ξ_star))
+        ĝ = [convert(Float64, subs(g, loss.ξ => ξ_star)) for g in ∇fs[k]]
+        p̂ = sum((ξ_star[j] - ξ̂[j])^wassinfo.p for j = 1:d)
+        val_k = v̂ - w̄ * p̂
+        if val_k > best_val
+            best_val = val_k
+            best_cut = [v̂ - ĝ' * x̄; ĝ; wassinfo.r^wassinfo.p - p̂]
         end
     end
-    # objective F(x̄, ξ) - w̄ ‖ξ - ξ̂‖^p (same convention as eval_moment_Wass)
-    F_expr  = _noncvx_subs_jump(f, loss.ξ, ξ)
-    pen_sym = sum((loss.ξ[j] - ξ̂[j])^wassinfo.p for j = 1:d)
-    P_expr  = _noncvx_subs_jump(pen_sym, loss.ξ, ξ)
-    @objective(model, Max, F_expr - w̄ * P_expr)
-    optimize!(model)
-    # accept proven-optimal as well as merely feasible solutions
-    # (a nonconvex global solver may stop at a time / node limit).
-    if !is_solved_and_feasible(model, allow_almost=true)
-        if print >= 0
-            println("DEBUG: nonconvex polynomial-loss subproblem $i did not solve, status: ",
-                    termination_status(model))
-            println("DEBUG: the current main problem solution is\n", x̄)
-            println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
-        end
-        return nothing
-    end
-    ξ_star = value.(ξ)
-    # subgradient at the global maximizer ξ* — formula (2.8) in the paper
-    v̂ = convert(Float64, subs(f, loss.ξ => ξ_star))
-    ĝ = [convert(Float64, subs(g, loss.ξ => ξ_star)) for g in ∇f]
-    p̂ = sum((ξ_star[j] - ξ̂[j])^wassinfo.p for j = 1:d)
-    # supporting affine function for `MainProblem.ϕ` evaluated as
-    #   cut'·[1; x; w] = (v̂ - ĝ'x̄) + ĝ'x + (r^p - p̂) w
-    return [v̂ - ĝ' * x̄; ĝ; wassinfo.r^wassinfo.p - p̂]
+    return best_cut
 end
 
 
@@ -170,15 +183,15 @@ function eval_noncvx_Wass(
     # the `solve_main_level` driver in `src/level_bundle.jl`.
     x̄ = augstate[1:end-1]
     w̄ = augstate[end]
-    # specialize F and ∇ₓF at x = x̄ — polynomials in ξ alone
-    # (matches the `f` / `∇f` construction in `src/moment_relax.jl`)
-    f  = subs(loss.F, loss.x => x̄)
-    ∇f = [subs(g, loss.x => x̄) for g in loss.∇ₓF]
+    K = length(loss.F)
+    # specialize each F[k] and ∇ₓF[k] at x = x̄ (polynomials in ξ alone)
+    fs  = [subs(loss.F[k], loss.x => x̄) for k in 1:K]
+    ∇fs = [[subs(g, loss.x => x̄) for g in loss.∇ₓF[k]] for k in 1:K]
     # parallelise the per-sample nonconvex solves; pmap preserves the input
     # index order, so cuts[i] is always the cut for samples[i].
     cuts = pmap(
         i -> _gen_noncvx_cut_polynomial_loss(
-                i, loss, samples, wassinfo, f, ∇f, x̄, w̄, print, noncvx_solver),
+                i, loss, samples, wassinfo, fs, ∇fs, x̄, w̄, print, noncvx_solver),
         1:N,
     )
     # if any sample's QCQP solve failed, propagate the same `nothing` that

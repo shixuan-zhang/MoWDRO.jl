@@ -25,6 +25,7 @@ function eval_nominal(
         details::Bool = false
     )
     N = length(samples)
+    K = length(loss.F)
     cuts = Vector{Float64}[]
     vals = Float64[]
     # alias the state vector
@@ -32,9 +33,12 @@ function eval_nominal(
     # loop over all samples for the loss function evaluation
     for i = 1:N # TODO: parallelize this for-loop
         ξ̂ = samples[i]
-        v̂ = convert(Float64,subs(loss.F,loss.x=>x̄,loss.ξ=>ξ̂))
-        ĝ = convert.(Float64,subs.(loss.∇ₓF,loss.x=>x̄,loss.ξ=>ξ̂))
-        # store the cut
+        # evaluate each F_k at (x̄, ξ̂) and pick the argmax branch
+        v_ks = [convert(Float64, subs(loss.F[k], loss.x=>x̄, loss.ξ=>ξ̂)) for k in 1:K]
+        k_star = argmax(v_ks)
+        v̂ = v_ks[k_star]
+        ĝ = convert.(Float64, subs.(loss.∇ₓF[k_star], loss.x=>x̄, loss.ξ=>ξ̂))
+        # store the cut for the active branch
         push!(cuts, [v̂-ĝ'*x̄;ĝ])
         # store the value if needed
         if details

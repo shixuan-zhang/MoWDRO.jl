@@ -60,14 +60,23 @@ struct SampleLinearRecourse <: SampleSubproblem
     B::Vector
 end
 
-# structure for (first-stage) polynomial loss function F(x,ξ)
-struct SamplePolynomialLoss <: SampleSubproblem 
+# structure for (first-stage) polynomial loss function
+#   F(x,ξ) := max_{k=1,…,K} F[k](x,ξ),
+# where each F[k] is a polynomial in (x,ξ). A plain polynomial loss is the
+# special case K = 1, handled transparently by the outer constructor below.
+struct SamplePolynomialLoss <: SampleSubproblem
     # PolyJuMP/DynamicPolynomials (Symbolic) Variables
     x::Vector
     ξ::Vector
-    # Polynomial Loss Function and Its Gradient in x
-    F::Polynomial
+    # Polynomial Loss Functions and Their Gradients in x
+    # F[k] is a Polynomial in (x,ξ); ∇ₓF[k] is the Vector of ∂F[k]/∂x_i.
+    F::Vector
     ∇ₓF::Vector
     # Semi-algebraic Uncertainty Set
     Ξ::BasicSemialgebraicSet
 end
+
+# backward-compat outer constructor for the single-polynomial case
+SamplePolynomialLoss(x::Vector, ξ::Vector, F::Polynomial, ∇ₓF::Vector,
+                     Ξ::BasicSemialgebraicSet) =
+    SamplePolynomialLoss(x, ξ, [F], [∇ₓF], Ξ)
