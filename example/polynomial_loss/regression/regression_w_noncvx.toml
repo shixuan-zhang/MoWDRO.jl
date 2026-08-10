@@ -18,6 +18,6 @@
 "noise standard deviation" = 0.1
 "support set"              = "orthant" # options: "full-space", "orthant", or "box"
 "probability for sparsity" = 0.2
-"CVaR level"               = 0.1       # β ∈ (0,1); paper (5.9) convention (β→0 = worst-tail)
-"tau lower bound"          = 0.0       # lower bound on the CVaR auxiliary decision τ
-"tau upper bound"          = 10.0      # upper bound on the CVaR auxiliary decision τ
+"CVaR level"               = 0.1       # β ∈ (0,1); Kuhn-Shafiee-Wiesemann (5.9) convention (β→0 = worst-tail)
+"VaR threshold lower bound" = 0.0       # lower bound on the β-VaR auxiliary decision τ
+"VaR threshold upper bound" = 100.0     # upper bound on the β-VaR auxiliary decision τ

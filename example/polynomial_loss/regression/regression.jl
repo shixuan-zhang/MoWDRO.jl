@@ -78,8 +78,8 @@ NOISE_SIGMA = Float64(PROB_CFG["noise standard deviation"])
 SUPPORT_SET = String(PROB_CFG["support set"])
 SPARSE_PROB = Float64(PROB_CFG["probability for sparsity"])
 CVAR_LEVEL  = Float64(PROB_CFG["CVaR level"])
-TAU_MIN     = Float64(PROB_CFG["tau lower bound"])
-TAU_MAX     = Float64(PROB_CFG["tau upper bound"])
+VART_MIN  = Float64(PROB_CFG["VaR threshold lower bound"])
+VART_MAX  = Float64(PROB_CFG["VaR threshold upper bound"])
 
 OUTPUT_FILE = resolve_output_file(
     "result_regression_cvar_$(NUM_VAR)_$(DEG_POLY)_beta" *
@@ -120,8 +120,8 @@ function experiment_regression(
         baseline::String = BASELINE,                # baseline method to compare against
         radius_scaling::Int = RADIUS_SCALING,       # s in r/(N/N_min)^(1/s); s ≤ 0 disables scaling
         num_reps::Int = NUM_REPS,                   # number of independent replications
-        tau_min::Float64 = TAU_MIN,                 # lower bound on τ
-        tau_max::Float64 = TAU_MAX,                 # upper bound on τ
+        vart_min::Float64 = VART_MIN,           # lower bound on the β-VaR threshold τ
+        vart_max::Float64 = VART_MAX,           # upper bound on the β-VaR threshold τ
     )
     baseline in ("none", "noncvx") || error(
         "baseline must be one of \"none\", \"noncvx\"; got \"$baseline\""
@@ -187,7 +187,7 @@ function experiment_regression(
     println("Training sample sizes to sweep: ", train_sizes)
     println("Number of testing samples: ", test_size)
     println("The CVaR level β = ", β)
-    println("The τ bounds are [", tau_min, ", ", tau_max, "]")
+    println("The VaR threshold bounds are [", vart_min, ", ", vart_max, "]")
     println("The (per-sample) loss branches are")
     println("  F1(x,τ,ξ) = ", F1)
     println("  F2(x,τ,ξ) = ", F2)
@@ -201,25 +201,29 @@ function experiment_regression(
     WASS_IDX    = Int[]
     REP_IDX     = Int[]
     TRAIN_SIZE  = Int[]
-    TRAIN_OBJ   = Float64[]
-    TRAIN_TIME  = Float64[]
-    TRAIN_TAU   = Float64[]
-    TEST_MEAN   = Float64[]
-    TEST_STD    = Float64[]
-    TEST_MED    = Float64[]
-    TEST_Q90    = Float64[]
-    TEST_Q10    = Float64[]
-    CVAR_COLUMN = Float64[]
+    TRAIN_OBJ      = Float64[]
+    TRAIN_TIME     = Float64[]
+    TRAIN_VART   = Float64[]
+    TEST_MEAN      = Float64[]
+    TEST_STD       = Float64[]
+    TEST_MED       = Float64[]
+    TEST_Q90       = Float64[]
+    TEST_Q10       = Float64[]
+    TEST_CVAR      = Float64[]
+    TEST_CVAR_STD  = Float64[]
+    CVAR_COLUMN    = Float64[]
     # nonconvex-baseline outputs (defined only if baseline == "noncvx")
     if baseline == "noncvx"
-        NCVX_OBJ   = Float64[]
-        NCVX_TIME  = Float64[]
-        NCVX_TAU   = Float64[]
-        NCVX_MEAN  = Float64[]
-        NCVX_STD   = Float64[]
-        NCVX_MED   = Float64[]
-        NCVX_Q90   = Float64[]
-        NCVX_Q10   = Float64[]
+        NCVX_OBJ      = Float64[]
+        NCVX_TIME     = Float64[]
+        NCVX_VART   = Float64[]
+        NCVX_MEAN     = Float64[]
+        NCVX_STD      = Float64[]
+        NCVX_MED      = Float64[]
+        NCVX_Q90      = Float64[]
+        NCVX_Q10      = Float64[]
+        NCVX_CVAR     = Float64[]
+        NCVX_CVAR_STD = Float64[]
     end
     # loop over all (training-sample size, replication, Wasserstein radius)
     # combinations. `train_sizes` stays outermost so the script works
@@ -243,7 +247,7 @@ function experiment_regression(
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_attribute(model, "OutputFlag", 0)
             x_reg = @variable(model, -1 <= x_reg[1:n] <= 1, base_name="x")
-            τ_var = @variable(model, tau_min <= τ_var <= tau_max, base_name="tau")
+            τ_var = @variable(model, vart_min <= τ_var <= vart_max, base_name="VaR_threshold")
             w     = @variable(model, w >= 0, base_name="w")
             ϕ     = @variable(model, ϕ >= 0, base_name="ϕ")
             main = MainProblem(model, [x_reg; τ_var], VariableRef[], w, ϕ,
@@ -280,7 +284,16 @@ function experiment_regression(
             # evaluate the out-of-sample performance:
             # vals[i] = F(x_opt, τ_opt, ξ̂^(i)) = max(0, (L(x_opt, ξ̂^(i)) - τ_opt)/β)
             _, vals = eval_nominal(loss, sol.x, sample_test, details=true)
-            println("The testing sample CVaR estimate = ", τ_opt + mean(vals))
+            # empirical β-CVaR of L(x_opt, ·) on the test set: mean and std of
+            # the top-β tail of the raw squared-loss values (direct polynomial
+            # substitution because `vals` clips L ≤ τ_opt to zero).
+            L_test        = [convert(Float64, subs(L, x=>x_opt, ξ=>ξ̂)) for ξ̂ in sample_test]
+            k_tail        = max(1, ceil(Int, β * length(L_test)))
+            L_tail        = partialsort(L_test, 1:k_tail; rev=true)
+            cvar_test     = mean(L_tail)
+            cvar_std_test = std(L_tail)
+            println("The testing sample DRO objective (τ + mean(vals)) = ", τ_opt + mean(vals))
+            println("The testing sample β-CVaR estimate = ", cvar_test, " ± ", cvar_std_test)
             println("The testing sample F-branch standard deviation = ", std(vals))
             # update the output file
             append!(WASS_DEG, wassinfo.p)
@@ -290,13 +303,15 @@ function experiment_regression(
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
-            append!(TRAIN_TAU, τ_opt)
+            append!(TRAIN_VART, τ_opt)
             append!(TEST_MEAN, τ_opt + mean(vals))
             append!(TEST_STD, std(vals))
             vec_quant = quantile(vals .+ τ_opt, [0.1,0.5,0.9])
             append!(TEST_Q10, vec_quant[1])
             append!(TEST_MED, vec_quant[2])
             append!(TEST_Q90, vec_quant[3])
+            append!(TEST_CVAR, cvar_test)
+            append!(TEST_CVAR_STD, cvar_std_test)
             append!(CVAR_COLUMN, β)
             # ---------------------------------------------------------------
             # Optional: solve the same instance with the nonconvex global
@@ -307,7 +322,7 @@ function experiment_regression(
                 model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
                 set_silent(model_NC)
                 x_reg_NC = @variable(model_NC, -1 <= x_reg_NC[1:n] <= 1, base_name="x_NC")
-                τ_NC     = @variable(model_NC, tau_min <= τ_NC <= tau_max, base_name="tau_NC")
+                τ_NC     = @variable(model_NC, vart_min <= τ_NC <= vart_max, base_name="VaR_threshold_NC")
                 w_NC     = @variable(model_NC, w_NC >= 0, base_name="w_NC")
                 ϕ_NC     = @variable(model_NC, ϕ_NC >= 0, base_name="ϕ_NC")
                 main_NC  = MainProblem(model_NC, [x_reg_NC; τ_NC], VariableRef[], w_NC, ϕ_NC,
@@ -341,41 +356,53 @@ function experiment_regression(
                 println("  Nonconvex baseline objective = ", sol_NC.f + sol_NC.ϕ)
                 println("  Nonconvex baseline time      = ", time_finish_NC - time_start_NC)
                 _, vals_NC = eval_nominal(loss, sol_NC.x, sample_test, details=true)
-                append!(NCVX_OBJ,  sol_NC.f + sol_NC.ϕ)
-                append!(NCVX_TIME, time_finish_NC - time_start_NC)
-                append!(NCVX_TAU,  τ_opt_NC)
-                append!(NCVX_MEAN, τ_opt_NC + mean(vals_NC))
-                append!(NCVX_STD,  std(vals_NC))
+                x_opt_NC   = sol_NC.x[1:end-1]
+                L_test_NC        = [convert(Float64, subs(L, x=>x_opt_NC, ξ=>ξ̂)) for ξ̂ in sample_test]
+                L_tail_NC        = partialsort(L_test_NC, 1:k_tail; rev=true)
+                cvar_test_NC     = mean(L_tail_NC)
+                cvar_std_test_NC = std(L_tail_NC)
+                append!(NCVX_OBJ,     sol_NC.f + sol_NC.ϕ)
+                append!(NCVX_TIME,    time_finish_NC - time_start_NC)
+                append!(NCVX_VART,  τ_opt_NC)
+                append!(NCVX_MEAN,    τ_opt_NC + mean(vals_NC))
+                append!(NCVX_STD,     std(vals_NC))
                 vec_quant_NC = quantile(vals_NC .+ τ_opt_NC, [0.1, 0.5, 0.9])
                 append!(NCVX_Q10, vec_quant_NC[1])
                 append!(NCVX_MED, vec_quant_NC[2])
                 append!(NCVX_Q90, vec_quant_NC[3])
-                println("  Nonconvex baseline test CVaR = ", τ_opt_NC + mean(vals_NC))
-                println("  Nonconvex baseline test std  = ", std(vals_NC))
+                append!(NCVX_CVAR,     cvar_test_NC)
+                append!(NCVX_CVAR_STD, cvar_std_test_NC)
+                println("  Nonconvex baseline DRO test obj  = ", τ_opt_NC + mean(vals_NC))
+                println("  Nonconvex baseline β-CVaR        = ", cvar_test_NC, " ± ", cvar_std_test_NC)
+                println("  Nonconvex baseline test std      = ", std(vals_NC))
             end
-            output = DataFrame(:WASS_IDX   => WASS_IDX,
-                               :REP_IDX    => REP_IDX,
-                               :WASS_DEG   => WASS_DEG,
-                               :WASS_RAD   => WASS_RAD,
-                               :TRAIN_SIZE => TRAIN_SIZE,
-                               :TRAIN_TIME => TRAIN_TIME,
-                               :TRAIN_OBJ  => TRAIN_OBJ,
-                               :TRAIN_TAU  => TRAIN_TAU,
-                               :TEST_MEAN  => TEST_MEAN,
-                               :TEST_STD   => TEST_STD,
-                               :TEST_Q10   => TEST_Q10,
-                               :TEST_MED   => TEST_MED,
-                               :TEST_Q90   => TEST_Q90,
-                               :CVAR_LEVEL => CVAR_COLUMN)
+            output = DataFrame(:WASS_IDX      => WASS_IDX,
+                               :REP_IDX       => REP_IDX,
+                               :WASS_DEG      => WASS_DEG,
+                               :WASS_RAD      => WASS_RAD,
+                               :TRAIN_SIZE    => TRAIN_SIZE,
+                               :TRAIN_TIME    => TRAIN_TIME,
+                               :TRAIN_OBJ     => TRAIN_OBJ,
+                               :TRAIN_VART  => TRAIN_VART,
+                               :TEST_MEAN     => TEST_MEAN,
+                               :TEST_STD      => TEST_STD,
+                               :TEST_Q10      => TEST_Q10,
+                               :TEST_MED      => TEST_MED,
+                               :TEST_Q90      => TEST_Q90,
+                               :TEST_CVAR     => TEST_CVAR,
+                               :TEST_CVAR_STD => TEST_CVAR_STD,
+                               :CVAR_LEVEL    => CVAR_COLUMN)
             if baseline == "noncvx"
-                output.NCVX_OBJ  = NCVX_OBJ
-                output.NCVX_TIME = NCVX_TIME
-                output.NCVX_TAU  = NCVX_TAU
-                output.NCVX_MEAN = NCVX_MEAN
-                output.NCVX_STD  = NCVX_STD
-                output.NCVX_Q10  = NCVX_Q10
-                output.NCVX_MED  = NCVX_MED
-                output.NCVX_Q90  = NCVX_Q90
+                output.NCVX_OBJ      = NCVX_OBJ
+                output.NCVX_TIME     = NCVX_TIME
+                output.NCVX_VART   = NCVX_VART
+                output.NCVX_MEAN     = NCVX_MEAN
+                output.NCVX_STD      = NCVX_STD
+                output.NCVX_Q10      = NCVX_Q10
+                output.NCVX_MED      = NCVX_MED
+                output.NCVX_Q90      = NCVX_Q90
+                output.NCVX_CVAR     = NCVX_CVAR
+                output.NCVX_CVAR_STD = NCVX_CVAR_STD
             end
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
@@ -397,5 +424,5 @@ experiment_regression(NUM_VAR, DEG_POLY, NOISE_SIGMA, CVAR_LEVEL,
                       baseline       = BASELINE,
                       radius_scaling = RADIUS_SCALING,
                       num_reps       = NUM_REPS,
-                      tau_min        = TAU_MIN,
-                      tau_max        = TAU_MAX)
+                      vart_min     = VART_MIN,
+                      vart_max     = VART_MAX)

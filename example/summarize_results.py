@@ -17,10 +17,19 @@ data = pd.read_csv(str_input_file)
 
 cpos_cols = [c for c in data.columns if c.startswith('CPOS_')]
 has_cpos = 'CPOS_TIME' in cpos_cols
+# Optional out-of-sample CVaR columns emitted by the CVaR-DRO regression
+# example. Both must be present to enable the extra plot line and table
+# column; the summarizer stays backward-compatible when they are absent.
+has_cvar = 'TEST_CVAR' in data.columns and 'TEST_CVAR_STD' in data.columns
 
 mean_cols = ['WASS_RAD', 'TRAIN_TIME', 'TRAIN_OBJ',
              'TEST_MEAN', 'TEST_STD', 'TEST_Q10', 'TEST_MED', 'TEST_Q90']
 mean_cols += cpos_cols
+if has_cvar:
+    # TEST_CVAR is a per-row scalar (mean of the top-β tail) and
+    # TEST_CVAR_STD is a per-row scalar (std of the same tail); we
+    # want both averaged across replications when a group has >1 rep.
+    mean_cols += ['TEST_CVAR', 'TEST_CVAR_STD']
 std_cols = ['TRAIN_OBJ', 'TEST_MEAN', 'TEST_STD']
 if has_cpos:
     std_cols = std_cols + ['CPOS_OBJ', 'CPOS_MEAN', 'CPOS_STD']
@@ -114,6 +123,18 @@ for w in dro_indices:
     body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_MEAN') + "    };\n"
     body += "    \\addlegendentry{ESO test mean and 10-90\\% range};\n"
 
+    # test CVaR curves — same colour/base pattern as the matching test-mean
+    # line so DRO/ESO groupings stay visually consistent; marker distinguishes
+    # CVaR from mean.
+    if has_cvar:
+        body += "    \\addplot[color=blue,very thick,densely dotted,mark=triangle*,mark size=2pt]\n"
+        body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_CVAR') + "    };\n"
+        body += "    \\addlegendentry{DRO test CVaR};\n"
+
+        body += "    \\addplot[color=red,very thick,dashdotted,mark=square*,mark size=2pt]\n"
+        body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_CVAR') + "    };\n"
+        body += "    \\addlegendentry{ESO test CVaR};\n"
+
     body += "    \\addplot[color=blue,very thick,solid,mark=x]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TRAIN_OBJ') + "    };\n"
     body += "    \\addlegendentry{DRO training obj.\\ value};\n"
@@ -168,26 +189,40 @@ def fmt_pm(mean, std, digits):
 
 
 if has_cpos:
-    table = r"""\documentclass{standalone}
-\usepackage{booktabs,mathpazo}
-\begin{document}
-\begin{tabular}{rrrrrrrrrr}
-\toprule
- & & \multicolumn{4}{c}{Moment-WDRO} & \multicolumn{4}{c}{Hanasusanto-Kuhn} \\
-\cmidrule(lr){3-6} \cmidrule(lr){7-10}
-$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std.
-     & Time (s) & Training Obj. & Test Mean & Test Std. \\
-\midrule
-"""
+    # extra column when TEST_CVAR is available
+    _cvar_header = " & Test CVaR" if has_cvar else ""
+    _col_spec    = "rrrrrrrrrrr" if has_cvar else "rrrrrrrrrr"
+    _mo_span     = 5             if has_cvar else 4
+    _mo_range    = "3-7"         if has_cvar else "3-6"
+    _hk_range    = "8-11"        if has_cvar else "7-10"
+    table = (
+        r"\documentclass{standalone}" "\n"
+        r"\usepackage{booktabs,mathpazo}" "\n"
+        r"\begin{document}" "\n"
+        r"\begin{tabular}{" + _col_spec + "}\n"
+        r"\toprule" "\n"
+        " & & \\multicolumn{" + str(_mo_span) + r"}{c}{Moment-WDRO} "
+        "& \\multicolumn{4}{c}{Hanasusanto-Kuhn} \\\\\n"
+        r"\cmidrule(lr){" + _mo_range + "} "
+        r"\cmidrule(lr){" + _hk_range + "}\n"
+        "$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std."
+        + _cvar_header +
+        "\n     & Time (s) & Training Obj. & Test Mean & Test Std. \\\\\n"
+        r"\midrule" "\n"
+    )
 else:
-    table = r"""\documentclass{standalone}
-\usepackage{booktabs,mathpazo}
-\begin{document}
-\begin{tabular}{rrrrrr}
-\toprule
-$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std. \\
-\midrule
-"""
+    _cvar_header = " & Test CVaR" if has_cvar else ""
+    _col_spec    = "rrrrrrr" if has_cvar else "rrrrrr"
+    table = (
+        r"\documentclass{standalone}" "\n"
+        r"\usepackage{booktabs,mathpazo}" "\n"
+        r"\begin{document}" "\n"
+        r"\begin{tabular}{" + _col_spec + "}\n"
+        r"\toprule" "\n"
+        "$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std."
+        + _cvar_header + " \\\\\n"
+        r"\midrule" "\n"
+    )
 
 
 def obj_cell(row, mean_col, std_col, digits):
@@ -212,6 +247,11 @@ for _, row in agg.iterrows():
         obj_cell(row, 'TEST_MEAN', 'TEST_MEAN_SAMPLE_STD', obj_digits),
         obj_cell(row, 'TEST_STD', 'TEST_STD_SAMPLE_STD', obj_digits),
     ]
+    # Test-CVaR ± tail-std (both averaged across replications). Uses
+    # `fmt_pm` for the plus-minus rendering; both quantities are always
+    # present when `has_cvar` is True.
+    if has_cvar:
+        cells.append(fmt_pm(row['TEST_CVAR'], row['TEST_CVAR_STD'], obj_digits))
     if has_cpos:
         cells += [
             fmt(row['CPOS_TIME'], 1),
