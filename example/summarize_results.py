@@ -22,14 +22,25 @@ has_cpos = 'CPOS_TIME' in cpos_cols
 # column; the summarizer stays backward-compatible when they are absent.
 has_cvar = 'TEST_CVAR' in data.columns and 'TEST_CVAR_STD' in data.columns
 
+# Resolve low/high quantile columns: CVaR-regression CSVs use the new
+# β-dependent TEST_QLOW/TEST_QHIGH; older CSVs (or non-CVaR experiments)
+# still ship the hard-coded TEST_Q10/TEST_Q90 columns.
+qlow_col  = 'TEST_QLOW'  if 'TEST_QLOW'  in data.columns else 'TEST_Q10'
+qhigh_col = 'TEST_QHIGH' if 'TEST_QHIGH' in data.columns else 'TEST_Q90'
+# β column is emitted alongside TEST_QLOW/QHIGH by the CVaR example; when
+# present we can render the actual percentages in each plot's legend.
+has_beta  = 'CVAR_LEVEL' in data.columns
+
 mean_cols = ['WASS_RAD', 'TRAIN_TIME', 'TRAIN_OBJ',
-             'TEST_MEAN', 'TEST_STD', 'TEST_Q10', 'TEST_MED', 'TEST_Q90']
+             'TEST_MEAN', 'TEST_STD', qlow_col, 'TEST_MED', qhigh_col]
 mean_cols += cpos_cols
 if has_cvar:
     # TEST_CVAR is a per-row scalar (mean of the top-β tail) and
     # TEST_CVAR_STD is a per-row scalar (std of the same tail); we
     # want both averaged across replications when a group has >1 rep.
     mean_cols += ['TEST_CVAR', 'TEST_CVAR_STD']
+if has_beta:
+    mean_cols += ['CVAR_LEVEL']
 std_cols = ['TRAIN_OBJ', 'TEST_MEAN', 'TEST_STD']
 if has_cpos:
     std_cols = std_cols + ['CPOS_OBJ', 'CPOS_MEAN', 'CPOS_STD']
@@ -99,29 +110,39 @@ for w in dro_indices:
     r0 = float(dro_rows.iloc[0]['WASS_RAD'])
     r0_str = "{:.3f}".format(r0).rstrip('0').rstrip('.')
     title_str = "Initial radius $r_0 = " + r0_str + "$"
+    # β-dependent quantile band label. When the CSV carries CVAR_LEVEL we
+    # derive the exact percentages from β (β/2 and 1-β/2); otherwise fall
+    # back to the legacy 10-90% label.
+    if has_beta:
+        beta      = float(dro_rows.iloc[0]['CVAR_LEVEL'])
+        low_pct   = int(round(beta / 2 * 100))
+        high_pct  = int(round((1 - beta / 2) * 100))
+    else:
+        low_pct, high_pct = 10, 90
+    band_label = str(low_pct) + "-" + str(high_pct) + "\\%"
     body = ""
 
     body += "    \\addplot[name path=DRO10_" + str(k) + ",color=blue!50,densely dotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q10') + "    };\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, qlow_col) + "    };\n"
     body += "    \\addplot[name path=DRO90_" + str(k) + ",color=blue!50,densely dotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q90') + "    };\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, qhigh_col) + "    };\n"
     body += ("    \\addplot[pattern=north east lines,pattern color=blue!10,forget plot] "
              "fill between [of=DRO10_" + str(k) + " and DRO90_" + str(k) + "];\n")
 
     body += "    \\addplot[name path=ESO10_" + str(k) + ",color=red!50,dashdotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q10') + "    };\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, qlow_col) + "    };\n"
     body += "    \\addplot[name path=ESO90_" + str(k) + ",color=red!50,dashdotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q90') + "    };\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, qhigh_col) + "    };\n"
     body += ("    \\addplot[pattern=north west lines,pattern color=red!10,forget plot] "
              "fill between [of=ESO10_" + str(k) + " and ESO90_" + str(k) + "];\n")
 
     body += "    \\addplot[color=blue,very thick,densely dotted]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_MEAN') + "    };\n"
-    body += "    \\addlegendentry{DRO test mean and 10-90\\% range};\n"
+    body += "    \\addlegendentry{DRO test mean and " + band_label + " range};\n"
 
     body += "    \\addplot[color=red,very thick,dashdotted]\n"
     body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_MEAN') + "    };\n"
-    body += "    \\addlegendentry{ESO test mean and 10-90\\% range};\n"
+    body += "    \\addlegendentry{ESO test mean and " + band_label + " range};\n"
 
     # test CVaR curves — same colour/base pattern as the matching test-mean
     # line so DRO/ESO groupings stay visually consistent; marker distinguishes

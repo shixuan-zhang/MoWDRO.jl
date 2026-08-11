@@ -179,7 +179,12 @@ function experiment_regression(
                                      [ξ[i] for i in 1:m];
                                      [1-ξ[i] for i in 1:m]]
                                 end)
-    loss = SamplePolynomialLoss([x; τ], ξ, Fs, ∇Fs, Ξ)
+    # max-of-two-polys CVaR loss (used only for training)
+    loss_train = SamplePolynomialLoss([x; τ], ξ, Fs, ∇Fs, Ξ)
+    # plain least-squares loss (used only for out-of-sample evaluation of the
+    # recovered x; τ plays no role in test statistics)
+    ∇ₓL       = differentiate(L, x)
+    loss_test = SamplePolynomialLoss(x, ξ, L, ∇ₓL, Ξ)
     # print the problem information
     println("Start the experiment on the CVaR-DRO polynomial regression problem...")
     println("The number of regression parameters is ", n)
@@ -207,8 +212,8 @@ function experiment_regression(
     TEST_MEAN      = Float64[]
     TEST_STD       = Float64[]
     TEST_MED       = Float64[]
-    TEST_Q90       = Float64[]
-    TEST_Q10       = Float64[]
+    TEST_QLOW      = Float64[]
+    TEST_QHIGH     = Float64[]
     TEST_CVAR      = Float64[]
     TEST_CVAR_STD  = Float64[]
     CVAR_COLUMN    = Float64[]
@@ -220,8 +225,8 @@ function experiment_regression(
         NCVX_MEAN     = Float64[]
         NCVX_STD      = Float64[]
         NCVX_MED      = Float64[]
-        NCVX_Q90      = Float64[]
-        NCVX_Q10      = Float64[]
+        NCVX_QLOW     = Float64[]
+        NCVX_QHIGH    = Float64[]
         NCVX_CVAR     = Float64[]
         NCVX_CVAR_STD = Float64[]
     end
@@ -258,7 +263,7 @@ function experiment_regression(
             # solve the problem
             time_start = time()
             sol = solve_main_level(main,
-                                   loss,
+                                   loss_train,
                                    sample_train,
                                    wassinfo,
                                    print=1,
@@ -281,20 +286,20 @@ function experiment_regression(
             println("The training sample objective = ", sol.f+sol.ϕ)
             println("The total computation time is ", time_finish-time_start)
             println("Start the out-of-sample test for the solution...")
-            # evaluate the out-of-sample performance:
-            # vals[i] = F(x_opt, τ_opt, ξ̂^(i)) = max(0, (L(x_opt, ξ̂^(i)) - τ_opt)/β)
-            _, vals = eval_nominal(loss, sol.x, sample_test, details=true)
-            # empirical β-CVaR of L(x_opt, ·) on the test set: mean and std of
-            # the top-β tail of the raw squared-loss values (direct polynomial
-            # substitution because `vals` clips L ≤ τ_opt to zero).
-            L_test        = [convert(Float64, subs(L, x=>x_opt, ξ=>ξ̂)) for ξ̂ in sample_test]
+            # Out-of-sample: use the plain least-squares loss on the recovered
+            # x — τ plays no role in test statistics. `L_test[i] = L(x_opt, ξ̂_i)`
+            # is what `eval_nominal(loss_test, ...)` returns as its `vals`.
+            _, L_test     = eval_nominal(loss_test, x_opt, sample_test, details=true)
+            L_sorted_desc = sort(L_test; rev=true)
             k_tail        = max(1, ceil(Int, β * length(L_test)))
-            L_tail        = partialsort(L_test, 1:k_tail; rev=true)
+            L_tail        = @view L_sorted_desc[1:k_tail]
             cvar_test     = mean(L_tail)
             cvar_std_test = std(L_tail)
-            println("The testing sample DRO objective (τ + mean(vals)) = ", τ_opt + mean(vals))
-            println("The testing sample β-CVaR estimate = ", cvar_test, " ± ", cvar_std_test)
-            println("The testing sample F-branch standard deviation = ", std(vals))
+            vec_quant     = quantile(L_test, [β/2, 0.5, 1 - β/2])
+            println("The testing sample mean L                     = ", mean(L_test))
+            println("The testing sample std  L                     = ", std(L_test))
+            println("The testing sample β-CVaR of L                = ", cvar_test, " ± ", cvar_std_test)
+            println("The testing sample quantiles at (β/2,0.5,1-β/2) = ", vec_quant)
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
@@ -304,13 +309,12 @@ function experiment_regression(
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
             append!(TRAIN_VART, τ_opt)
-            append!(TEST_MEAN, τ_opt + mean(vals))
-            append!(TEST_STD, std(vals))
-            vec_quant = quantile(vals .+ τ_opt, [0.1,0.5,0.9])
-            append!(TEST_Q10, vec_quant[1])
-            append!(TEST_MED, vec_quant[2])
-            append!(TEST_Q90, vec_quant[3])
-            append!(TEST_CVAR, cvar_test)
+            append!(TEST_MEAN,  mean(L_test))
+            append!(TEST_STD,   std(L_test))
+            append!(TEST_QLOW,  vec_quant[1])
+            append!(TEST_MED,   vec_quant[2])
+            append!(TEST_QHIGH, vec_quant[3])
+            append!(TEST_CVAR,     cvar_test)
             append!(TEST_CVAR_STD, cvar_std_test)
             append!(CVAR_COLUMN, β)
             # ---------------------------------------------------------------
@@ -340,7 +344,7 @@ function experiment_regression(
                                      noncvx_solver=noncvx_solver, print=print)
                 time_start_NC = time()
                 sol_NC = solve_main_level(main_NC,
-                                          loss,
+                                          loss_train,
                                           sample_train,
                                           wassinfo,
                                           print=2, # TODO: disable detailed printing after debugging
@@ -351,30 +355,31 @@ function experiment_regression(
                                           cut_evaluator=eval_noncvx_cut)
                 time_finish_NC = time()
                 τ_opt_NC = sol_NC.x[end]
-                println("  Nonconvex baseline x         = ", sol_NC.x[1:end-1])
+                x_opt_NC = sol_NC.x[1:end-1]
+                println("  Nonconvex baseline x         = ", x_opt_NC)
                 println("  Nonconvex baseline τ         = ", τ_opt_NC)
                 println("  Nonconvex baseline objective = ", sol_NC.f + sol_NC.ϕ)
                 println("  Nonconvex baseline time      = ", time_finish_NC - time_start_NC)
-                _, vals_NC = eval_nominal(loss, sol_NC.x, sample_test, details=true)
-                x_opt_NC   = sol_NC.x[1:end-1]
-                L_test_NC        = [convert(Float64, subs(L, x=>x_opt_NC, ξ=>ξ̂)) for ξ̂ in sample_test]
-                L_tail_NC        = partialsort(L_test_NC, 1:k_tail; rev=true)
-                cvar_test_NC     = mean(L_tail_NC)
-                cvar_std_test_NC = std(L_tail_NC)
+                # out-of-sample: least-squares loss, same convention as the DRO path
+                _, L_test_NC        = eval_nominal(loss_test, x_opt_NC, sample_test, details=true)
+                L_sorted_desc_NC    = sort(L_test_NC; rev=true)
+                L_tail_NC           = @view L_sorted_desc_NC[1:k_tail]
+                cvar_test_NC        = mean(L_tail_NC)
+                cvar_std_test_NC    = std(L_tail_NC)
+                vec_quant_NC        = quantile(L_test_NC, [β/2, 0.5, 1 - β/2])
                 append!(NCVX_OBJ,     sol_NC.f + sol_NC.ϕ)
                 append!(NCVX_TIME,    time_finish_NC - time_start_NC)
-                append!(NCVX_VART,  τ_opt_NC)
-                append!(NCVX_MEAN,    τ_opt_NC + mean(vals_NC))
-                append!(NCVX_STD,     std(vals_NC))
-                vec_quant_NC = quantile(vals_NC .+ τ_opt_NC, [0.1, 0.5, 0.9])
-                append!(NCVX_Q10, vec_quant_NC[1])
-                append!(NCVX_MED, vec_quant_NC[2])
-                append!(NCVX_Q90, vec_quant_NC[3])
+                append!(NCVX_VART,    τ_opt_NC)
+                append!(NCVX_MEAN,    mean(L_test_NC))
+                append!(NCVX_STD,     std(L_test_NC))
+                append!(NCVX_QLOW,    vec_quant_NC[1])
+                append!(NCVX_MED,     vec_quant_NC[2])
+                append!(NCVX_QHIGH,   vec_quant_NC[3])
                 append!(NCVX_CVAR,     cvar_test_NC)
                 append!(NCVX_CVAR_STD, cvar_std_test_NC)
-                println("  Nonconvex baseline DRO test obj  = ", τ_opt_NC + mean(vals_NC))
+                println("  Nonconvex baseline test mean L   = ", mean(L_test_NC))
+                println("  Nonconvex baseline test std  L   = ", std(L_test_NC))
                 println("  Nonconvex baseline β-CVaR        = ", cvar_test_NC, " ± ", cvar_std_test_NC)
-                println("  Nonconvex baseline test std      = ", std(vals_NC))
             end
             output = DataFrame(:WASS_IDX      => WASS_IDX,
                                :REP_IDX       => REP_IDX,
@@ -386,9 +391,9 @@ function experiment_regression(
                                :TRAIN_VART  => TRAIN_VART,
                                :TEST_MEAN     => TEST_MEAN,
                                :TEST_STD      => TEST_STD,
-                               :TEST_Q10      => TEST_Q10,
+                               :TEST_QLOW     => TEST_QLOW,
                                :TEST_MED      => TEST_MED,
-                               :TEST_Q90      => TEST_Q90,
+                               :TEST_QHIGH    => TEST_QHIGH,
                                :TEST_CVAR     => TEST_CVAR,
                                :TEST_CVAR_STD => TEST_CVAR_STD,
                                :CVAR_LEVEL    => CVAR_COLUMN)
@@ -398,9 +403,9 @@ function experiment_regression(
                 output.NCVX_VART   = NCVX_VART
                 output.NCVX_MEAN     = NCVX_MEAN
                 output.NCVX_STD      = NCVX_STD
-                output.NCVX_Q10      = NCVX_Q10
+                output.NCVX_QLOW     = NCVX_QLOW
                 output.NCVX_MED      = NCVX_MED
-                output.NCVX_Q90      = NCVX_Q90
+                output.NCVX_QHIGH    = NCVX_QHIGH
                 output.NCVX_CVAR     = NCVX_CVAR
                 output.NCVX_CVAR_STD = NCVX_CVAR_STD
             end
