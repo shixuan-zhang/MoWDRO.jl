@@ -8,9 +8,9 @@
 "maximum cut coefficient" = 1.0e4
 "baseline method"         = "noncvx"
 "radius scaling"          = 0
-"number of replications"  = 1
+"number of replications"  = 3
 "Wasserstein order"       = 2
-"Wasserstein radii"       = [0.0, 2.0e-2, 1.0e-1]
+"Wasserstein radii sweeps"= [{ start = 0.0, stop = 1.0e-1, step = 2.0e-2 }]
 
 [problem]
 "number of variables"      = 3

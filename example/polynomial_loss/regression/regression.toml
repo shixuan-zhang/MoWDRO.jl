@@ -9,12 +9,12 @@
 "baseline method"         = "none"
 "radius scaling"          = 2 
 "random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
-"number of replications"  = 5
+"number of replications"  = 10
 "Wasserstein order"       = 2
-"Wasserstein radii"       = [0.0, 1e-2, 2e-2, 5e-2]
+"Wasserstein radii"       = [0.0, 1e-2, 2e-2, 5e-2, 1e-1]
 
 [problem]
-"number of variables"      = 5
+"number of variables"      = 10
 "truth polynomial degree"  = 2
 "noise standard deviation" = 0.1
 "support set"              = "orthant"  # options: "full-space", "orthant", or "box"
