@@ -1,20 +1,7 @@
-# numerical example for a CVaR/superquantile DRO regression problem, derived
-# from the Rockafellar-Uryasev reformulation in equation (5.9) of the
-# Kuhn-Shafiee-Wiesemann DRO survey (see `claude/DRO_CVaR.pdf`):
-#
-#   inf_{x, τ}  τ + (1/β) sup_{P ∈ W_r(P̂)} E_P[max(0, L(x, ξ) - τ)],
-#
-# with ambiguity radius r > 0, level β ∈ (0,1), and squared regression loss
-#
-#   L(x, ξ) := (v - ∑_a x_a · z^a)^2,   ξ = (z, v) ∈ Z × ℝ ⊆ ℝ^{m+1}.
-#
-# Absorbing 1/β into the max, the inner integrand is the pointwise maximum
-# of two polynomials in the extended decision (x, τ):
-#   F1(x, τ, ξ) = 0,
-#   F2(x, τ, ξ) = (L(x, ξ) - τ) / β.
-# `MainProblem`'s linear objective (via f_x = [zeros(n); 1.0]) carries the
-# outer + τ, and `ϕ` approximates the Wasserstein-DRO inner supremum.
-#
+# numerical example for a polynomial regression problem defined by
+# min E[F(x,ξ)], x ∈ [-1,1]ⁿ, ξ = (z,v) ∈ Z × ℝ ⊆ ℝᵐ⁺¹,
+# where n = (m+d choose d), for the input degree d ≥ 1, and
+# F(x,ξ) := (v - ∑ₐ xₐ⋅zᵃ)² is the squared loss function.
 # Currently the allowed options for Z are:
 # (1) entire space ℝᵐ,
 # (2) nonnegative orthant [0,+∞)ᵐ,
@@ -77,13 +64,14 @@ DEG_POLY    = Int(PROB_CFG["truth polynomial degree"])
 NOISE_SIGMA = Float64(PROB_CFG["noise standard deviation"])
 SUPPORT_SET = String(PROB_CFG["support set"])
 SPARSE_PROB = Float64(PROB_CFG["probability for sparsity"])
-CVAR_LEVEL  = Float64(PROB_CFG["CVaR level"])
-VART_MIN  = Float64(PROB_CFG["VaR threshold lower bound"])
-VART_MAX  = Float64(PROB_CFG["VaR threshold upper bound"])
+LOSS_TYPE      = String(get(PROB_CFG, "regression type", "mean"))
+QUANTILE_LEVEL = Float64(get(PROB_CFG, "quantile level", 0.5))
 
 OUTPUT_FILE = resolve_output_file(
-    "result_regression_cvar_$(NUM_VAR)_$(DEG_POLY)_beta" *
-    replace(string(CVAR_LEVEL), "." => "p") * ".csv"
+    LOSS_TYPE == "quantile" ?
+        "result_regression_$(NUM_VAR)_$(DEG_POLY)_pinball_tau" *
+            replace(string(QUANTILE_LEVEL), "." => "p") * ".csv" :
+        "result_regression_$(NUM_VAR)_$(DEG_POLY).csv"
 )
 
 # helper function to generate multiindices of n variables up to degree d
@@ -104,12 +92,11 @@ function multiindices(n, d)
     return indices
 end
 
-# function that conducts CVaR-DRO regression experiments
+# function that conducts experiments on the polynomial regression examples
 function experiment_regression(
         m::Int,                                     # regressor dimension
         d::Int,                                     # polynomial degree
         σ::Float64,                                 # noise standard deviation
-        β::Float64,                                 # CVaR level β ∈ (0,1)
         wass_radii::Vector{Float64},                # Wasserstein radii to sweep
         wass_order::Int,                            # shared Wasserstein order (p)
         train_sizes::Vector{Int} = TRAIN_SIZES,     # list of training-sample sizes to sweep
@@ -120,8 +107,8 @@ function experiment_regression(
         baseline::String = BASELINE,                # baseline method to compare against
         radius_scaling::Int = RADIUS_SCALING,       # s in r/(N/N_min)^(1/s); s ≤ 0 disables scaling
         num_reps::Int = NUM_REPS,                   # number of independent replications
-        vart_min::Float64 = VART_MIN,           # lower bound on the β-VaR threshold τ
-        vart_max::Float64 = VART_MAX,           # upper bound on the β-VaR threshold τ
+        loss_type::String = LOSS_TYPE,              # "mean" (squared loss) or "quantile" (pinball loss)
+        quantile_level::Float64 = QUANTILE_LEVEL,   # τ ∈ (0,1) — only used when loss_type = "quantile"
     )
     baseline in ("none", "noncvx") || error(
         "baseline must be one of \"none\", \"noncvx\"; got \"$baseline\""
@@ -129,8 +116,13 @@ function experiment_regression(
     support_set in ("full-space", "orthant", "box") || error(
         "support set must be one of \"full-space\", \"orthant\", \"box\"; got \"$support_set\""
     )
+    loss_type in ("mean", "quantile") || error(
+        "regression type must be one of \"mean\", \"quantile\"; got \"$loss_type\""
+    )
+    (loss_type == "quantile" && !(0.0 < quantile_level < 1.0)) && error(
+        "quantile level must lie strictly in (0,1); got $quantile_level"
+    )
     isempty(train_sizes) && error("training sample sizes array must be non-empty")
-    (0.0 < β < 1.0) || error("CVaR level β must lie strictly in (0,1); got β = $β")
     # randomly generate a covariance matrix if not supplied
     if size(Σ) != (m,m)
         L_Σ = rand(m,m)
@@ -163,15 +155,10 @@ function experiment_regression(
         for _ in 1:num_reps
     ]
     sample_test = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:test_size])
-    # define the max-of-two-polynomials CVaR loss (per eq. (5.9)):
-    #   F(x, τ, ξ) = max(0, (L(x, ξ) - τ)/β).
+    # define the loss function
     n = length(A)
-    @polyvar x[1:n] τ ξ[1:(m+1)] # ξ = (z, v); τ is the CVaR auxiliary decision
-    L  = (ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n))^2
-    F2 = (L - τ) * (1.0 / β)
-    F1 = zero(F2)                                   # 0 polynomial of the same type as F2
-    Fs   = [F1, F2]
-    ∇Fs  = [differentiate(F1, [x; τ]), differentiate(F2, [x; τ])]
+    @polyvar x[1:n] ξ[1:(m+1)] # ξ = (z,v)
+    residual = ξ[m+1] - sum(x[i] * prod(ξ[j]^A[i][j] for j in 1:m) for i in 1:n)
     Ξ = basicsemialgebraicset(FullSpace(), if support_set == "orthant"
                                     [ξ[i] + 0.0 for i in 1:m]
                                 elseif support_set == "box"
@@ -179,56 +166,63 @@ function experiment_regression(
                                      [ξ[i] for i in 1:m];
                                      [1-ξ[i] for i in 1:m]]
                                 end)
-    # max-of-two-polys CVaR loss (used only for training)
-    loss_train = SamplePolynomialLoss([x; τ], ξ, Fs, ∇Fs, Ξ)
-    # plain least-squares loss (used only for out-of-sample evaluation of the
-    # recovered x; τ plays no role in test statistics)
-    ∇ₓL       = differentiate(L, x)
-    loss_test = SamplePolynomialLoss(x, ξ, L, ∇ₓL, Ξ)
+    # squared loss for mean regression, or pinball loss ρ_τ(residual) =
+    # max(τ·residual, (τ-1)·residual) rewritten as the max of two polynomials
+    # so that the max-of-polys `SamplePolynomialLoss` path handles it.
+    loss = if loss_type == "mean"
+        F   = residual^2
+        ∇ₓF = differentiate(F, x)
+        SamplePolynomialLoss(x, ξ, F, ∇ₓF, Ξ)
+    else # "quantile"
+        τ  = quantile_level
+        F1 = τ * residual
+        F2 = (τ - 1.0) * residual
+        SamplePolynomialLoss(x, ξ, [F1, F2],
+                             [differentiate(F1, x), differentiate(F2, x)], Ξ)
+    end
     # print the problem information
-    println("Start the experiment on the CVaR-DRO polynomial regression problem...")
+    println("Start the experiment on the polynomial regression problem...")
+    println("The regression type is \"", loss_type, "\"",
+            loss_type == "quantile" ? " with quantile level τ = $(quantile_level)" : "")
     println("The number of regression parameters is ", n)
     println("The number of regressors is ", m)
     println("Training sample sizes to sweep: ", train_sizes)
     println("Number of testing samples: ", test_size)
-    println("The CVaR level β = ", β)
-    println("The VaR threshold bounds are [", vart_min, ", ", vart_max, "]")
-    println("The (per-sample) loss branches are")
-    println("  F1(x,τ,ξ) = ", F1)
-    println("  F2(x,τ,ξ) = ", F2)
+    println("The loss function is ",
+            loss_type == "mean" ? residual^2 :
+                "max(", quantile_level, "·residual, ",
+                quantile_level - 1.0, "·residual)")
     println("The ground truth is ", truth)
     println("The noise std is ", σ)
     println("The sample covariance matrix is\n", Σ)
     println()
     # prepare the table for output
-    WASS_RAD    = Float64[]
-    WASS_DEG    = Int[]
-    WASS_IDX    = Int[]
-    REP_IDX     = Int[]
-    TRAIN_SIZE  = Int[]
-    TRAIN_OBJ      = Float64[]
-    TRAIN_TIME     = Float64[]
-    TRAIN_VART   = Float64[]
-    TEST_MEAN      = Float64[]
-    TEST_STD       = Float64[]
-    TEST_MED       = Float64[]
-    TEST_QLOW      = Float64[]
-    TEST_QHIGH     = Float64[]
-    TEST_CVAR      = Float64[]
-    TEST_CVAR_STD  = Float64[]
-    CVAR_COLUMN    = Float64[]
+    WASS_RAD   = Float64[]
+    WASS_DEG   = Int[]
+    WASS_IDX   = Int[]
+    REP_IDX    = Int[]
+    TRAIN_SIZE = Int[]
+    TRAIN_OBJ  = Float64[]
+    TRAIN_TIME = Float64[]
+    TEST_MEAN  = Float64[]
+    TEST_STD   = Float64[]
+    TEST_MED   = Float64[]
+    TEST_Q90   = Float64[]
+    TEST_Q10   = Float64[]
+    # τ column emitted only for quantile-regression runs; the summarizer
+    # uses its presence to relabel plots with the pinball-loss context.
+    if loss_type == "quantile"
+        QUANTILE_COLUMN = Float64[]
+    end
     # nonconvex-baseline outputs (defined only if baseline == "noncvx")
     if baseline == "noncvx"
-        NCVX_OBJ      = Float64[]
-        NCVX_TIME     = Float64[]
-        NCVX_VART   = Float64[]
-        NCVX_MEAN     = Float64[]
-        NCVX_STD      = Float64[]
-        NCVX_MED      = Float64[]
-        NCVX_QLOW     = Float64[]
-        NCVX_QHIGH    = Float64[]
-        NCVX_CVAR     = Float64[]
-        NCVX_CVAR_STD = Float64[]
+        NCVX_OBJ   = Float64[]
+        NCVX_TIME  = Float64[]
+        NCVX_MEAN  = Float64[]
+        NCVX_STD   = Float64[]
+        NCVX_MED   = Float64[]
+        NCVX_Q90   = Float64[]
+        NCVX_Q10   = Float64[]
     end
     # loop over all (training-sample size, replication, Wasserstein radius)
     # combinations. `train_sizes` stays outermost so the script works
@@ -251,19 +245,17 @@ function experiment_regression(
             # define the main linear optimization problem
             model = Model(() -> Gurobi.Optimizer(GRB_ENV))
             set_attribute(model, "OutputFlag", 0)
-            x_reg = @variable(model, -1 <= x_reg[1:n] <= 1, base_name="x")
-            τ_var = @variable(model, vart_min <= τ_var <= vart_max, base_name="VaR_threshold")
-            w     = @variable(model, w >= 0, base_name="w")
-            ϕ     = @variable(model, ϕ >= 0, base_name="ϕ")
-            main = MainProblem(model, [x_reg; τ_var], VariableRef[], w, ϕ,
-                               [zeros(n); 1.0], Float64[])
-            # set the Wasserstein dual variable feasibility tolerance
+            x = @variable(model, -1 <= x[1:n] <= 1, base_name="x")
+            w = @variable(model, w >= 0, base_name="w")
+            ϕ = @variable(model, ϕ >= 0, base_name="ϕ")
+            main = MainProblem(model, x, VariableRef[], w, ϕ, zeros(n), Float64[])
+            # set the Wasserstein dual variable feasibility tolerance 
             # relative to the optimality gap
             tol_aux_feas = min(OPT_GAP / (2*wass_r^wass_order), 1)
             # solve the problem
             time_start = time()
             sol = solve_main_level(main,
-                                   loss_train,
+                                   loss,
                                    sample_train,
                                    wassinfo,
                                    print=1,
@@ -275,31 +267,18 @@ function experiment_regression(
                                    tol_aux_feas=tol_aux_feas,
                                    mom_solver=Mosek.Optimizer)
             time_finish = time()
-            τ_opt = sol.x[end]
-            x_opt = sol.x[1:end-1]
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
                     ", training size = ", N)
-            println("x = ", x_opt)
-            println("τ = ", τ_opt)
-            println("f (linear obj at solution = τ) = ", sol.f)
+            println("x = ", sol.x)
+            println("f = ", sol.f)
             println("ϕ = ", sol.ϕ)
             println("The training sample objective = ", sol.f+sol.ϕ)
             println("The total computation time is ", time_finish-time_start)
             println("Start the out-of-sample test for the solution...")
-            # Out-of-sample: use the plain least-squares loss on the recovered
-            # x — τ plays no role in test statistics. `L_test[i] = L(x_opt, ξ̂_i)`
-            # is what `eval_nominal(loss_test, ...)` returns as its `vals`.
-            _, L_test     = eval_nominal(loss_test, x_opt, sample_test, details=true)
-            L_sorted_desc = sort(L_test; rev=true)
-            k_tail        = max(1, ceil(Int, β * length(L_test)))
-            L_tail        = @view L_sorted_desc[1:k_tail]
-            cvar_test     = mean(L_tail)
-            cvar_std_test = std(L_tail)
-            vec_quant     = quantile(L_test, [β/2, 0.5, 1 - β/2])
-            println("The testing sample mean L                     = ", mean(L_test))
-            println("The testing sample std  L                     = ", std(L_test))
-            println("The testing sample β-CVaR of L                = ", cvar_test, " ± ", cvar_std_test)
-            println("The testing sample quantiles at (β/2,0.5,1-β/2) = ", vec_quant)
+            # evaluate the out-of-sample performance
+            _, vals = eval_nominal(loss, sol.x, sample_test, details=true)
+            println("The testing sample mean = ", mean(vals)+sol.f)
+            println("The testing sample standard deviation = ", std(vals))
             # update the output file
             append!(WASS_DEG, wassinfo.p)
             append!(WASS_RAD, wassinfo.r)
@@ -308,15 +287,15 @@ function experiment_regression(
             append!(TRAIN_SIZE, N)
             append!(TRAIN_TIME, time_finish-time_start)
             append!(TRAIN_OBJ, sol.f+sol.ϕ)
-            append!(TRAIN_VART, τ_opt)
-            append!(TEST_MEAN,  mean(L_test))
-            append!(TEST_STD,   std(L_test))
-            append!(TEST_QLOW,  vec_quant[1])
-            append!(TEST_MED,   vec_quant[2])
-            append!(TEST_QHIGH, vec_quant[3])
-            append!(TEST_CVAR,     cvar_test)
-            append!(TEST_CVAR_STD, cvar_std_test)
-            append!(CVAR_COLUMN, β)
+            append!(TEST_MEAN, mean(vals)+sol.f)
+            append!(TEST_STD, std(vals))
+            vec_quant = quantile(vals.+sol.f, [0.1,0.5,0.9])
+            append!(TEST_Q10, vec_quant[1])
+            append!(TEST_MED, vec_quant[2])
+            append!(TEST_Q90, vec_quant[3])
+            if loss_type == "quantile"
+                append!(QUANTILE_COLUMN, quantile_level)
+            end
             # ---------------------------------------------------------------
             # Optional: solve the same instance with the nonconvex global
             # baseline (level bundle with `eval_noncvx_Wass`) at the same
@@ -325,12 +304,10 @@ function experiment_regression(
                 println("Solve the same instance with the nonconvex global baseline...")
                 model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
                 set_silent(model_NC)
-                x_reg_NC = @variable(model_NC, -1 <= x_reg_NC[1:n] <= 1, base_name="x_NC")
-                τ_NC     = @variable(model_NC, vart_min <= τ_NC <= vart_max, base_name="VaR_threshold_NC")
-                w_NC     = @variable(model_NC, w_NC >= 0, base_name="w_NC")
-                ϕ_NC     = @variable(model_NC, ϕ_NC >= 0, base_name="ϕ_NC")
-                main_NC  = MainProblem(model_NC, [x_reg_NC; τ_NC], VariableRef[], w_NC, ϕ_NC,
-                                       [zeros(n); 1.0], Float64[])
+                x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= 1, base_name="x_NC")
+                w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
+                ϕ_NC = @variable(model_NC, ϕ_NC >= 0, base_name="ϕ_NC")
+                main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
                 noncvx_solver = () -> begin
                     opt = Gurobi.Optimizer(GRB_ENV)
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
@@ -344,7 +321,7 @@ function experiment_regression(
                                      noncvx_solver=noncvx_solver, print=print)
                 time_start_NC = time()
                 sol_NC = solve_main_level(main_NC,
-                                          loss_train,
+                                          loss,
                                           sample_train,
                                           wassinfo,
                                           print=2, # TODO: disable detailed printing after debugging
@@ -354,60 +331,44 @@ function experiment_regression(
                                           min_phi=MIN_PHI,
                                           cut_evaluator=eval_noncvx_cut)
                 time_finish_NC = time()
-                τ_opt_NC = sol_NC.x[end]
-                x_opt_NC = sol_NC.x[1:end-1]
-                println("  Nonconvex baseline x         = ", x_opt_NC)
-                println("  Nonconvex baseline τ         = ", τ_opt_NC)
-                println("  Nonconvex baseline objective = ", sol_NC.f + sol_NC.ϕ)
-                println("  Nonconvex baseline time      = ", time_finish_NC - time_start_NC)
-                # out-of-sample: least-squares loss, same convention as the DRO path
-                _, L_test_NC        = eval_nominal(loss_test, x_opt_NC, sample_test, details=true)
-                L_sorted_desc_NC    = sort(L_test_NC; rev=true)
-                L_tail_NC           = @view L_sorted_desc_NC[1:k_tail]
-                cvar_test_NC        = mean(L_tail_NC)
-                cvar_std_test_NC    = std(L_tail_NC)
-                vec_quant_NC        = quantile(L_test_NC, [β/2, 0.5, 1 - β/2])
-                append!(NCVX_OBJ,     sol_NC.f + sol_NC.ϕ)
-                append!(NCVX_TIME,    time_finish_NC - time_start_NC)
-                append!(NCVX_VART,    τ_opt_NC)
-                append!(NCVX_MEAN,    mean(L_test_NC))
-                append!(NCVX_STD,     std(L_test_NC))
-                append!(NCVX_QLOW,    vec_quant_NC[1])
-                append!(NCVX_MED,     vec_quant_NC[2])
-                append!(NCVX_QHIGH,   vec_quant_NC[3])
-                append!(NCVX_CVAR,     cvar_test_NC)
-                append!(NCVX_CVAR_STD, cvar_std_test_NC)
-                println("  Nonconvex baseline test mean L   = ", mean(L_test_NC))
-                println("  Nonconvex baseline test std  L   = ", std(L_test_NC))
-                println("  Nonconvex baseline β-CVaR        = ", cvar_test_NC, " ± ", cvar_std_test_NC)
+                println("  Nonconvex baseline x          = ", sol_NC.x)
+                println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)
+                println("  Nonconvex baseline time       = ", time_finish_NC - time_start_NC)
+                _, vals_NC = eval_nominal(loss, sol_NC.x, sample_test, details=true)
+                append!(NCVX_OBJ,  sol_NC.f + sol_NC.ϕ)
+                append!(NCVX_TIME, time_finish_NC - time_start_NC)
+                append!(NCVX_MEAN, mean(vals_NC) + sol_NC.f)
+                append!(NCVX_STD,  std(vals_NC))
+                vec_quant_NC = quantile(vals_NC .+ sol_NC.f, [0.1, 0.5, 0.9])
+                append!(NCVX_Q10, vec_quant_NC[1])
+                append!(NCVX_MED, vec_quant_NC[2])
+                append!(NCVX_Q90, vec_quant_NC[3])
+                println("  Nonconvex baseline test mean  = ", mean(vals_NC) + sol_NC.f)
+                println("  Nonconvex baseline test std   = ", std(vals_NC))
             end
-            output = DataFrame(:WASS_IDX      => WASS_IDX,
-                               :REP_IDX       => REP_IDX,
-                               :WASS_DEG      => WASS_DEG,
-                               :WASS_RAD      => WASS_RAD,
-                               :TRAIN_SIZE    => TRAIN_SIZE,
-                               :TRAIN_TIME    => TRAIN_TIME,
-                               :TRAIN_OBJ     => TRAIN_OBJ,
-                               :TRAIN_VART  => TRAIN_VART,
-                               :TEST_MEAN     => TEST_MEAN,
-                               :TEST_STD      => TEST_STD,
-                               :TEST_QLOW     => TEST_QLOW,
-                               :TEST_MED      => TEST_MED,
-                               :TEST_QHIGH    => TEST_QHIGH,
-                               :TEST_CVAR     => TEST_CVAR,
-                               :TEST_CVAR_STD => TEST_CVAR_STD,
-                               :CVAR_LEVEL    => CVAR_COLUMN)
+            output = DataFrame(:WASS_IDX   => WASS_IDX,
+                               :REP_IDX    => REP_IDX,
+                               :WASS_DEG   => WASS_DEG,
+                               :WASS_RAD   => WASS_RAD,
+                               :TRAIN_SIZE => TRAIN_SIZE,
+                               :TRAIN_TIME => TRAIN_TIME,
+                               :TRAIN_OBJ  => TRAIN_OBJ,
+                               :TEST_MEAN  => TEST_MEAN,
+                               :TEST_STD   => TEST_STD,
+                               :TEST_Q10   => TEST_Q10,
+                               :TEST_MED   => TEST_MED,
+                               :TEST_Q90   => TEST_Q90)
             if baseline == "noncvx"
-                output.NCVX_OBJ      = NCVX_OBJ
-                output.NCVX_TIME     = NCVX_TIME
-                output.NCVX_VART   = NCVX_VART
-                output.NCVX_MEAN     = NCVX_MEAN
-                output.NCVX_STD      = NCVX_STD
-                output.NCVX_QLOW     = NCVX_QLOW
-                output.NCVX_MED      = NCVX_MED
-                output.NCVX_QHIGH    = NCVX_QHIGH
-                output.NCVX_CVAR     = NCVX_CVAR
-                output.NCVX_CVAR_STD = NCVX_CVAR_STD
+                output.NCVX_OBJ  = NCVX_OBJ
+                output.NCVX_TIME = NCVX_TIME
+                output.NCVX_MEAN = NCVX_MEAN
+                output.NCVX_STD  = NCVX_STD
+                output.NCVX_Q10  = NCVX_Q10
+                output.NCVX_MED  = NCVX_MED
+                output.NCVX_Q90  = NCVX_Q90
+            end
+            if loss_type == "quantile"
+                output.QUANTILE_LEVEL = QUANTILE_COLUMN
             end
             CSV.write(OUTPUT_FILE, output)
             println("Update the result in ", OUTPUT_FILE)
@@ -422,12 +383,12 @@ function experiment_regression(
 end
 
 # run the experiment
-experiment_regression(NUM_VAR, DEG_POLY, NOISE_SIGMA, CVAR_LEVEL,
+experiment_regression(NUM_VAR, DEG_POLY, NOISE_SIGMA,
                       WASS_RADII, WASS_ORDER, TRAIN_SIZES, TEST_SIZE;
                       support_set    = SUPPORT_SET,
                       sparse_prob    = SPARSE_PROB,
                       baseline       = BASELINE,
                       radius_scaling = RADIUS_SCALING,
                       num_reps       = NUM_REPS,
-                      vart_min     = VART_MIN,
-                      vart_max     = VART_MAX)
+                      loss_type      = LOSS_TYPE,
+                      quantile_level = QUANTILE_LEVEL)

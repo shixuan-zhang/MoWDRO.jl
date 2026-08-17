@@ -17,30 +17,19 @@ data = pd.read_csv(str_input_file)
 
 cpos_cols = [c for c in data.columns if c.startswith('CPOS_')]
 has_cpos = 'CPOS_TIME' in cpos_cols
-# Optional out-of-sample CVaR columns emitted by the CVaR-DRO regression
-# example. Both must be present to enable the extra plot line and table
-# column; the summarizer stays backward-compatible when they are absent.
-has_cvar = 'TEST_CVAR' in data.columns and 'TEST_CVAR_STD' in data.columns
-
-# Resolve low/high quantile columns: CVaR-regression CSVs use the new
-# β-dependent TEST_QLOW/TEST_QHIGH; older CSVs (or non-CVaR experiments)
-# still ship the hard-coded TEST_Q10/TEST_Q90 columns.
-qlow_col  = 'TEST_QLOW'  if 'TEST_QLOW'  in data.columns else 'TEST_Q10'
-qhigh_col = 'TEST_QHIGH' if 'TEST_QHIGH' in data.columns else 'TEST_Q90'
-# β column is emitted alongside TEST_QLOW/QHIGH by the CVaR example; when
-# present we can render the actual percentages in each plot's legend.
-has_beta  = 'CVAR_LEVEL' in data.columns
+# Quantile-regression runs emit a `QUANTILE_LEVEL` column filled with τ on
+# every row. When present, the summarizer relabels each per-radius plot to
+# reflect the pinball-loss context; the underlying data schema is otherwise
+# identical to the mean-regression case.
+has_quantile = ('QUANTILE_LEVEL' in data.columns
+                and data['QUANTILE_LEVEL'].notna().any()
+                and float(data['QUANTILE_LEVEL'].dropna().iloc[0]) > 0)
 
 mean_cols = ['WASS_RAD', 'TRAIN_TIME', 'TRAIN_OBJ',
-             'TEST_MEAN', 'TEST_STD', qlow_col, 'TEST_MED', qhigh_col]
+             'TEST_MEAN', 'TEST_STD', 'TEST_Q10', 'TEST_MED', 'TEST_Q90']
 mean_cols += cpos_cols
-if has_cvar:
-    # TEST_CVAR is a per-row scalar (mean of the top-β tail) and
-    # TEST_CVAR_STD is a per-row scalar (std of the same tail); we
-    # want both averaged across replications when a group has >1 rep.
-    mean_cols += ['TEST_CVAR', 'TEST_CVAR_STD']
-if has_beta:
-    mean_cols += ['CVAR_LEVEL']
+if has_quantile:
+    mean_cols += ['QUANTILE_LEVEL']
 std_cols = ['TRAIN_OBJ', 'TEST_MEAN', 'TEST_STD']
 if has_cpos:
     std_cols = std_cols + ['CPOS_OBJ', 'CPOS_MEAN', 'CPOS_STD']
@@ -110,51 +99,40 @@ for w in dro_indices:
     r0 = float(dro_rows.iloc[0]['WASS_RAD'])
     r0_str = "{:.3f}".format(r0).rstrip('0').rstrip('.')
     title_str = "Initial radius $r_0 = " + r0_str + "$"
-    # β-dependent quantile band label. When the CSV carries CVAR_LEVEL we
-    # derive the exact percentages from β (β/2 and 1-β/2); otherwise fall
-    # back to the legacy 10-90% label.
-    if has_beta:
-        beta      = float(dro_rows.iloc[0]['CVAR_LEVEL'])
-        low_pct   = int(round(beta / 2 * 100))
-        high_pct  = int(round((1 - beta / 2) * 100))
+    # In a quantile-regression run every row carries the same τ; tag the
+    # plot title with (pinball loss, $\tau=X$) and swap the y-axis label
+    # to the pinball loss symbol. Otherwise fall back to the mean-regression
+    # defaults.
+    if has_quantile:
+        tau_val = float(dro_rows.iloc[0]['QUANTILE_LEVEL'])
+        tau_str = ("{:.3f}".format(tau_val)).rstrip('0').rstrip('.')
+        title_str = title_str + r" (pinball loss, $\tau=" + tau_str + "$)"
+        axis_ylabel = r"Pinball loss $\rho_\tau$"
     else:
-        low_pct, high_pct = 10, 90
-    band_label = str(low_pct) + "-" + str(high_pct) + "\\%"
+        axis_ylabel = "Obj.\\ Value"
     body = ""
 
     body += "    \\addplot[name path=DRO10_" + str(k) + ",color=blue!50,densely dotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(dro_rows, qlow_col) + "    };\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q10') + "    };\n"
     body += "    \\addplot[name path=DRO90_" + str(k) + ",color=blue!50,densely dotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(dro_rows, qhigh_col) + "    };\n"
+    body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_Q90') + "    };\n"
     body += ("    \\addplot[pattern=north east lines,pattern color=blue!10,forget plot] "
              "fill between [of=DRO10_" + str(k) + " and DRO90_" + str(k) + "];\n")
 
     body += "    \\addplot[name path=ESO10_" + str(k) + ",color=red!50,dashdotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(eso_rows, qlow_col) + "    };\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q10') + "    };\n"
     body += "    \\addplot[name path=ESO90_" + str(k) + ",color=red!50,dashdotted,thick,forget plot]\n"
-    body += "    coordinates {\n" + coords_block(eso_rows, qhigh_col) + "    };\n"
+    body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_Q90') + "    };\n"
     body += ("    \\addplot[pattern=north west lines,pattern color=red!10,forget plot] "
              "fill between [of=ESO10_" + str(k) + " and ESO90_" + str(k) + "];\n")
 
     body += "    \\addplot[color=blue,very thick,densely dotted]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_MEAN') + "    };\n"
-    body += "    \\addlegendentry{DRO test mean and " + band_label + " range};\n"
+    body += "    \\addlegendentry{DRO test mean and 10-90\\% range};\n"
 
     body += "    \\addplot[color=red,very thick,dashdotted]\n"
     body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_MEAN') + "    };\n"
-    body += "    \\addlegendentry{ESO test mean and " + band_label + " range};\n"
-
-    # test CVaR curves — same colour/base pattern as the matching test-mean
-    # line so DRO/ESO groupings stay visually consistent; marker distinguishes
-    # CVaR from mean.
-    if has_cvar:
-        body += "    \\addplot[color=blue,very thick,densely dotted,mark=triangle*,mark size=2pt]\n"
-        body += "    coordinates {\n" + coords_block(dro_rows, 'TEST_CVAR') + "    };\n"
-        body += "    \\addlegendentry{DRO test CVaR};\n"
-
-        body += "    \\addplot[color=red,very thick,dashdotted,mark=square*,mark size=2pt]\n"
-        body += "    coordinates {\n" + coords_block(eso_rows, 'TEST_CVAR') + "    };\n"
-        body += "    \\addlegendentry{ESO test CVaR};\n"
+    body += "    \\addlegendentry{ESO test mean and 10-90\\% range};\n"
 
     body += "    \\addplot[color=blue,very thick,solid,mark=x]\n"
     body += "    coordinates {\n" + coords_block(dro_rows, 'TRAIN_OBJ') + "    };\n"
@@ -166,7 +144,7 @@ for w in dro_indices:
 
     plot_path = str_output_dir + str_file_name + "_" + str(k) + "_plot.tex"
     with open(plot_path, "w") as f:
-        f.write(plot_preamble + axis_open(title_str) + body + plot_footer)
+        f.write(plot_preamble + axis_open(title_str, ylabel=axis_ylabel) + body + plot_footer)
 
 if has_cpos:
     cpos_colors = ['red', 'blue', 'green!60!black',
@@ -210,40 +188,26 @@ def fmt_pm(mean, std, digits):
 
 
 if has_cpos:
-    # extra column when TEST_CVAR is available
-    _cvar_header = " & Test CVaR" if has_cvar else ""
-    _col_spec    = "rrrrrrrrrrr" if has_cvar else "rrrrrrrrrr"
-    _mo_span     = 5             if has_cvar else 4
-    _mo_range    = "3-7"         if has_cvar else "3-6"
-    _hk_range    = "8-11"        if has_cvar else "7-10"
-    table = (
-        r"\documentclass{standalone}" "\n"
-        r"\usepackage{booktabs,mathpazo}" "\n"
-        r"\begin{document}" "\n"
-        r"\begin{tabular}{" + _col_spec + "}\n"
-        r"\toprule" "\n"
-        " & & \\multicolumn{" + str(_mo_span) + r"}{c}{Moment-WDRO} "
-        "& \\multicolumn{4}{c}{Hanasusanto-Kuhn} \\\\\n"
-        r"\cmidrule(lr){" + _mo_range + "} "
-        r"\cmidrule(lr){" + _hk_range + "}\n"
-        "$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std."
-        + _cvar_header +
-        "\n     & Time (s) & Training Obj. & Test Mean & Test Std. \\\\\n"
-        r"\midrule" "\n"
-    )
+    table = r"""\documentclass{standalone}
+\usepackage{booktabs,mathpazo}
+\begin{document}
+\begin{tabular}{rrrrrrrrrr}
+\toprule
+ & & \multicolumn{4}{c}{Moment-WDRO} & \multicolumn{4}{c}{Hanasusanto-Kuhn} \\
+\cmidrule(lr){3-6} \cmidrule(lr){7-10}
+$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std.
+     & Time (s) & Training Obj. & Test Mean & Test Std. \\
+\midrule
+"""
 else:
-    _cvar_header = " & Test CVaR" if has_cvar else ""
-    _col_spec    = "rrrrrrr" if has_cvar else "rrrrrr"
-    table = (
-        r"\documentclass{standalone}" "\n"
-        r"\usepackage{booktabs,mathpazo}" "\n"
-        r"\begin{document}" "\n"
-        r"\begin{tabular}{" + _col_spec + "}\n"
-        r"\toprule" "\n"
-        "$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std."
-        + _cvar_header + " \\\\\n"
-        r"\midrule" "\n"
-    )
+    table = r"""\documentclass{standalone}
+\usepackage{booktabs,mathpazo}
+\begin{document}
+\begin{tabular}{rrrrrr}
+\toprule
+$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std. \\
+\midrule
+"""
 
 
 def obj_cell(row, mean_col, std_col, digits):
@@ -268,11 +232,6 @@ for _, row in agg.iterrows():
         obj_cell(row, 'TEST_MEAN', 'TEST_MEAN_SAMPLE_STD', obj_digits),
         obj_cell(row, 'TEST_STD', 'TEST_STD_SAMPLE_STD', obj_digits),
     ]
-    # Test-CVaR ± tail-std (both averaged across replications). Uses
-    # `fmt_pm` for the plus-minus rendering; both quantities are always
-    # present when `has_cvar` is True.
-    if has_cvar:
-        cells.append(fmt_pm(row['TEST_CVAR'], row['TEST_CVAR_STD'], obj_digits))
     if has_cpos:
         cells += [
             fmt(row['CPOS_TIME'], 1),
