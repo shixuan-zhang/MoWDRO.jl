@@ -13,7 +13,7 @@
 "Wasserstein radii sweeps"= [{ start = 0.0, stop = 1.0e-1, step = 2.0e-2 }]
 
 [problem]
-"number of variables"      = 3
+"number of variables"      = 10
 "truth polynomial degree"  = 2
 "noise standard deviation" = 0.1
 "support set"              = "orthant"  # options: "full-space", "orthant", or "box"
