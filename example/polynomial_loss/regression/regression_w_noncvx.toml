@@ -13,10 +13,10 @@
 "Wasserstein radii sweeps"= [{ start = 0.0, stop = 1.0e-1, step = 2.0e-2 }]
 
 [problem]
-"number of variables"      = 10
+"number of variables"      = 5
 "truth polynomial degree"  = 2
 "noise standard deviation" = 0.1
-"support set"              = "orthant"  # options: "full-space", "orthant", or "box"
+"support set"              = "box"  # options: "full-space", "orthant", or "box"
 "probability for sparsity" = 0.2
 "regression type"          = "quantile" # options: "mean" (squared loss) or "quantile" (pinball loss)
 "quantile level"           = 0.5        # τ ∈ (0,1); used only when "regression type" = "quantile"

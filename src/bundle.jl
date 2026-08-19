@@ -237,6 +237,7 @@ function solve_main_level(
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
                        iter, val_ϕ+val_f, max_obj, min_obj)
             if print >= 1
+                println("  The current feasible x = ", sol_x)
                 println("  The current Wasserstein dual variable = ", sol_w)
             end
         end
@@ -433,6 +434,7 @@ function solve_main_proximal(
                 printfmtln(" Iteration {} (serious step): center value = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",
                            iter, ctr_obj, v_k, weight)
                 if print >= 1
+                    println("  The current feasible x = ", ctr_x)
                     println("  The current Wasserstein dual variable = ", ctr_w)
                 end
             end
