@@ -20,6 +20,7 @@ using DataFrames, CSV
 using Gurobi, Mosek, MosekTools
 using MoWDRO
 const GRB_ENV = Gurobi.Env()
+const GRB_MAX_TIME = 600 # seconds, to prevent stagnation in the nonconvex baseline
 # load modules on the worker processes
 let
     setup_expr = quote
@@ -310,10 +311,9 @@ function experiment_regression(
                 main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
                 noncvx_solver = () -> begin
                     opt = Gurobi.Optimizer(GRB_ENV)
-                    MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
-                    #MOI.set(opt, MOI.RawOptimizerAttribute("MIPGap"), 1e-2)
-                    MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), 1e-4)
-                    MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), 600)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2) # enable nonconvex formulations
+                    MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), OPT_GAP/2)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), GRB_MAX_TIME)
                     opt
                 end
                 eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->

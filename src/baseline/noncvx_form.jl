@@ -281,6 +281,7 @@ function _gen_noncvx_cut_linear_recourse(
             println("DEBUG: the current main problem solution is\n", x̄)
             println("DEBUG: the current Wasserstein auxiliary variable is ", w̄)
         end
+        error("Fail to solve the nonconvex baseline approach.") # prevent stagnation from slow nonconvex baseline approaches
         return nothing
     end
     ξ_star = value.(ξ)
