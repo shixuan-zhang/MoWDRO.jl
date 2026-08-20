@@ -5,7 +5,7 @@
 "Wasserstein dual min"    = 0.0
 "Wasserstein dual max"    = 1.0e6
 "loss lower bound"        = 0.0
-"maximum cut coefficient" = 1.0e4
+"maximum cut coefficient" = 1.0e5
 "baseline method"         = "none"
 "radius scaling"          = 2 
 "random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
