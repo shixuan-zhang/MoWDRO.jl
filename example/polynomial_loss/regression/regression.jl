@@ -304,7 +304,7 @@ function experiment_regression(
                 println("Solve the same instance with the nonconvex global baseline...")
                 model_NC = Model(() -> Gurobi.Optimizer(GRB_ENV))
                 set_silent(model_NC)
-                x_NC = @variable(model_NC, 0 <= x_NC[1:n] <= 1, base_name="x_NC")
+                x_NC = @variable(model_NC, -1 <= x_NC[1:n] <= 1, base_name="x_NC")
                 w_NC = @variable(model_NC, w_NC >= 0, base_name="w_NC")
                 ϕ_NC = @variable(model_NC, ϕ_NC >= 0, base_name="ϕ_NC")
                 main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
@@ -313,7 +313,7 @@ function experiment_regression(
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2)
                     #MOI.set(opt, MOI.RawOptimizerAttribute("MIPGap"), 1e-2)
                     MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), 1e-4)
-                    #MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), 600)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), 600)
                     opt
                 end
                 eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
@@ -324,11 +324,13 @@ function experiment_regression(
                                           loss,
                                           sample_train,
                                           wassinfo,
-                                          print=2, # TODO: disable detailed printing after debugging
+                                          print=1, 
                                           opt_gap=OPT_GAP,
                                           max_aux=MAX_AUX,
                                           min_aux=MIN_AUX,
                                           min_phi=MIN_PHI,
+                                          max_cut_coef=MAX_CUT_COEF,
+                                          tol_aux_feas=tol_aux_feas,
                                           cut_evaluator=eval_noncvx_cut)
                 time_finish_NC = time()
                 println("  Nonconvex baseline x          = ", sol_NC.x)

@@ -95,6 +95,9 @@ function solve_main_level(
     flag_Wass = false
     if wassinfo.r > VAL_TOL
         flag_Wass = true
+        if print >= 1
+            println(" Wasserstein ambiguity set is enabled with radius = ", wassinfo.r)
+        end
     end
     # get the state dimension
     dim_x = length(main.x)
@@ -135,6 +138,9 @@ function solve_main_level(
         end
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
+        if print >= 2 # FIXME: remove this after debugging
+            println(" The generated cut is ", cut)
+        end
     end
     # round the cut coefficient to avoid numerical issues
     cut = round.(cut,digits=NUM_DIG)
@@ -217,6 +223,9 @@ function solve_main_level(
             end
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
+            if print >= 2 # FIXME: remove this after debugging
+                println(" The generated cut is ", cut)
+            end
         end
         # round the cut coefficient to avoid numerical issues
         cut = round.(cut, digits=NUM_DIG)
@@ -237,8 +246,10 @@ function solve_main_level(
             printfmtln(" Iteration {}: current objective = {:<6.2e}, upper bound = {:<6.2e}, lower bound = {:<6.2e}",
                        iter, val_ϕ+val_f, max_obj, min_obj)
             if print >= 1
-                println("  The current feasible x = ", sol_x)
                 println("  The current Wasserstein dual variable = ", sol_w)
+                if print > 1
+                    println("  The current feasible x = ", sol_x)
+                end
             end
         end
         iter += 1
@@ -301,7 +312,13 @@ function solve_main_proximal(
                              mom_solver=mom_solver, print=print) :
         cut_evaluator
     # check if Wasserstein ambiguity is needed
-    flag_Wass = wassinfo.r > VAL_TOL
+    flag_Wass = false
+    if wassinfo.r > VAL_TOL
+        flag_Wass = true
+        if print >= 1
+            println(" Wasserstein ambiguity set is enabled with radius = ", wassinfo.r)
+        end
+    end
     # get the state dimension and set up the linear objective expression
     dim_x = length(main.x)
     obj = main.f_x'*main.x + main.f_u'*main.u + main.ϕ
@@ -434,8 +451,10 @@ function solve_main_proximal(
                 printfmtln(" Iteration {} (serious step): center value = {:<6.4e}, predicted descent = {:<6.2e}, weight = {:<6.2e}",
                            iter, ctr_obj, v_k, weight)
                 if print >= 1
-                    println("  The current feasible x = ", ctr_x)
                     println("  The current Wasserstein dual variable = ", ctr_w)
+                    if print > 1
+                        println("  The current feasible x = ", ctr_x)
+                    end
                 end
             end
         else
