@@ -48,6 +48,7 @@ BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
 NUM_REPS       = parse_num_reps(EXP_CFG)
+TIME_LIMIT     = parse_time_limit(EXP_CFG)
 WASS_RADII     = parse_wass_radii(EXP_CFG)
 
 # bind problem-specific settings from [problem]
@@ -200,7 +201,8 @@ function experiment_portfolio(
                                    max_aux=MAX_AUX,
                                    min_aux=MIN_AUX,
                                    min_phi=MIN_PHI,
-                                   mom_solver=Mosek.Optimizer)
+                                   mom_solver=Mosek.Optimizer,
+                                   time_limit=TIME_LIMIT)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
                     ", training size = ", N)
@@ -259,7 +261,8 @@ function experiment_portfolio(
                                           max_aux=MAX_AUX,
                                           min_aux=MIN_AUX,
                                           min_phi=MIN_PHI,
-                                          cut_evaluator=eval_noncvx_cut)
+                                          cut_evaluator=eval_noncvx_cut,
+                                          time_limit=TIME_LIMIT)
                 time_finish_NC = time()
                 println("  Nonconvex baseline x          = ", sol_NC.x)
                 println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)

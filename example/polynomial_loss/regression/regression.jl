@@ -20,7 +20,6 @@ using DataFrames, CSV
 using Gurobi, Mosek, MosekTools
 using MoWDRO
 const GRB_ENV = Gurobi.Env()
-const GRB_MAX_TIME = 600 # seconds, to prevent stagnation in the nonconvex baseline
 # load modules on the worker processes
 let
     setup_expr = quote
@@ -56,7 +55,9 @@ BASELINE       = String(get(EXP_CFG, "baseline method", "none"))
 RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
 NUM_REPS       = parse_num_reps(EXP_CFG)
+TIME_LIMIT     = parse_time_limit(EXP_CFG)
 WASS_RADII     = parse_wass_radii(EXP_CFG)
+NCVX_MAX_TIME  = TIME_LIMIT > 0 ? ceil(Int, TIME_LIMIT/2) : 0
 
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
@@ -266,7 +267,8 @@ function experiment_regression(
                                    min_phi=MIN_PHI,
                                    max_cut_coef=MAX_CUT_COEF,
                                    tol_aux_feas=tol_aux_feas,
-                                   mom_solver=Mosek.Optimizer)
+                                   mom_solver=Mosek.Optimizer,
+                                   time_limit=TIME_LIMIT)
             time_finish = time()
             println("The main problem is solved for Wasserstein radius = ", wassinfo.r,
                     ", training size = ", N)
@@ -313,7 +315,7 @@ function experiment_regression(
                     opt = Gurobi.Optimizer(GRB_ENV)
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2) # enable nonconvex formulations
                     MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), OPT_GAP/2)
-                    MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), GRB_MAX_TIME)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), NCVX_MAX_TIME)
                     opt
                 end
                 eval_noncvx_cut = (subproblem, augstate, samples, wassinfo; print=0) ->
@@ -324,14 +326,15 @@ function experiment_regression(
                                           loss,
                                           sample_train,
                                           wassinfo,
-                                          print=1, 
+                                          print=1,
                                           opt_gap=OPT_GAP,
                                           max_aux=MAX_AUX,
                                           min_aux=MIN_AUX,
                                           min_phi=MIN_PHI,
                                           max_cut_coef=MAX_CUT_COEF,
                                           tol_aux_feas=tol_aux_feas,
-                                          cut_evaluator=eval_noncvx_cut)
+                                          cut_evaluator=eval_noncvx_cut,
+                                          time_limit=TIME_LIMIT)
                 time_finish_NC = time()
                 println("  Nonconvex baseline x          = ", sol_NC.x)
                 println("  Nonconvex baseline objective  = ", sol_NC.f + sol_NC.ϕ)

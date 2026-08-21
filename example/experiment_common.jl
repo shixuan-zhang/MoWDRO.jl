@@ -110,3 +110,20 @@ function parse_num_reps(exp_cfg::AbstractDict)
         "[experiment] \"number of replications\" must be a positive integer; got $(repr(v))")
     return Int(v)
 end
+
+"""
+    parse_time_limit(exp_cfg) -> Int
+
+Honour the optional `"time limit"` key under `[experiment]` (wall-clock
+seconds passed through as the `time_limit` kwarg of the bundle methods
+in `src/bundle.jl`). Returns the integer value when present, or `-1`
+when absent — the latter matches the bundle methods' default and
+disables the time-limit guard. Errors on any non-integer value.
+"""
+function parse_time_limit(exp_cfg::AbstractDict)
+    haskey(exp_cfg, "time limit") || return -1
+    v = exp_cfg["time limit"]
+    v isa Integer || error(
+        "[experiment] \"time limit\" must be an integer (seconds); got $(repr(v))")
+    return Int(v)
+end

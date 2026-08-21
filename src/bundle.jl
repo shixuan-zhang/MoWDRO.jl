@@ -81,7 +81,8 @@ function solve_main_level(
         level::Float64 = DEFAULT_LEVEL,
         mom_solver = DEFAULT_SDP,
         cut_evaluator = nothing,
-        print::Int = 1
+        print::Int = 1,
+        time_limit::Int = -1     # seconds; ≤ 0 disables the wall-clock guard
     )::MainSolution where T <: SampleSubproblem
     # `cut_evaluator` lets the caller swap the inner-supremum solver used to
     # generate cuts for `MainProblem.ϕ`. When `nothing`, fall back to the
@@ -91,6 +92,9 @@ function solve_main_level(
             eval_moment_Wass(subproblem, augstate, samples, wassinfo;
                              mom_solver=mom_solver, print=print) :
         cut_evaluator
+    # record the wall-clock start of the bundle driver so `time_limit` can
+    # be checked once per iteration (see the end of the main while-loop).
+    time_start = time()
     # check if Wasserstein ambiguity is needed
     flag_Wass = false
     if wassinfo.r > VAL_TOL
@@ -163,7 +167,7 @@ function solve_main_level(
         @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
         # get an updated lower bound
         optimize!(main.model)
-        if termination_status(main.model) != OPTIMAL && !has_values(main.model)
+        if !(termination_status(main.model) ∈ [OPTIMAL, ALMOST_OPTIMAL]) && !has_values(main.model)
             if print >= 0
                 println("DEBUG: the level bounding step runs into issues...\n", 
                         solution_summary(main.model,verbose=true))
@@ -193,7 +197,7 @@ function solve_main_level(
         @objective(main.model, Min, obj_proj)
         # find the next iterate
         optimize!(main.model)
-        if termination_status(main.model) != OPTIMAL && !has_values(main.model)
+        if !(termination_status(main.model) ∈ [OPTIMAL, ALMOST_OPTIMAL]) && !has_values(main.model)
             if print >= 0
                 println("DEBUG: the level projection step runs into issues...\n", 
                         solution_summary(main.model,verbose=true))
@@ -260,6 +264,14 @@ function solve_main_level(
             end
             return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
         end
+        # check if the wall-clock time limit has been exceeded
+        if time_limit > 0 && (time() - time_start) > time_limit
+            if print >= 0
+                printfmtln(" The level bundle method time limit ({} s) exceeded after {} iteration(s)",
+                           time_limit, iter - 1)
+            end
+            return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
+        end
     end
     if max_obj - min_obj < -opt_gap
         if print >= 0
@@ -296,7 +308,8 @@ function solve_main_proximal(
         tight_ratio::Float64   = DEFAULT_TIGHT_RATIO,
         mom_solver = DEFAULT_SDP,
         cut_evaluator = nothing,
-        print::Int = 1
+        print::Int = 1,
+        time_limit::Int = -1     # seconds; ≤ 0 disables the wall-clock guard
     )::MainSolution where T <: SampleSubproblem
     # validate proximal bundle parameters
     if !(0.0 < serious_ratio < 0.5) || !(serious_ratio < tight_ratio < 1.0) ||
@@ -311,6 +324,9 @@ function solve_main_proximal(
             eval_moment_Wass(subproblem, augstate, samples, wassinfo;
                              mom_solver=mom_solver, print=print) :
         cut_evaluator
+    # record the wall-clock start of the bundle driver so `time_limit` can
+    # be checked once per iteration (see the end of the main while-loop).
+    time_start = time()
     # check if Wasserstein ambiguity is needed
     flag_Wass = false
     if wassinfo.r > VAL_TOL
@@ -369,7 +385,7 @@ function solve_main_proximal(
         end
         @objective(main.model, Min, prox_obj)
         optimize!(main.model)
-        if termination_status(main.model) != OPTIMAL || !has_values(main.model)
+        if !(termination_status(main.model) ∈ [OPTIMAL, ALMOST_OPTIMAL]) && !has_values(main.model)
             if print >= 0
                 println("DEBUG: the proximal bundle direction step runs into issues...\n",
                         solution_summary(main.model,verbose=true))
@@ -421,6 +437,14 @@ function solve_main_proximal(
                            iter, weight)
             end
             iter += 1
+            # check if the wall-clock time limit has been exceeded
+            if time_limit > 0 && (time() - time_start) > time_limit
+                if print >= 0
+                    printfmtln(" The proximal bundle method time limit ({} s) exceeded after {} iteration(s)",
+                               time_limit, iter - 1)
+                end
+                return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
+            end
             continue
         end
         val_ϕ_trial = cut'*[1;sol_x;sol_w]
@@ -471,6 +495,14 @@ function solve_main_proximal(
             end
         end
         iter += 1
+        # check if the wall-clock time limit has been exceeded
+        if time_limit > 0 && (time() - time_start) > time_limit
+            if print >= 0
+                printfmtln(" The proximal bundle method time limit ({} s) exceeded after {} iteration(s)",
+                           time_limit, iter - 1)
+            end
+            return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
+        end
     end
     if iter > max_iter && print >= 0
         printfmtln(" The proximal bundle method does not converge within {} iterations", max_iter)
