@@ -142,9 +142,6 @@ function solve_main_level(
         end
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
-        if print >= 2 # FIXME: remove this after debugging
-            println(" The generated cut is ", cut)
-        end
     end
     # round the cut coefficient to avoid numerical issues
     cut = round.(cut,digits=NUM_DIG)
@@ -227,9 +224,6 @@ function solve_main_level(
             end
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
-            if print >= 2 # FIXME: remove this after debugging
-                println(" The generated cut is ", cut)
-            end
         end
         # round the cut coefficient to avoid numerical issues
         cut = round.(cut, digits=NUM_DIG)
