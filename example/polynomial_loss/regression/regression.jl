@@ -313,6 +313,7 @@ function experiment_regression(
                 main_NC = MainProblem(model_NC, x_NC, VariableRef[], w_NC, ϕ_NC, zeros(n), Float64[])
                 noncvx_solver = () -> begin
                     opt = Gurobi.Optimizer(GRB_ENV)
+                    MOI.set(opt, MOI.RawOptimizerAttribute("OutputFlag"), 0)
                     MOI.set(opt, MOI.RawOptimizerAttribute("NonConvex"), 2) # enable nonconvex formulations
                     MOI.set(opt, MOI.RawOptimizerAttribute("MIPGapAbs"), OPT_GAP/2)
                     MOI.set(opt, MOI.RawOptimizerAttribute("TimeLimit"), NCVX_MAX_TIME)

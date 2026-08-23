@@ -11,7 +11,7 @@
 "radius scaling"          = 0
 "number of replications"  = 3
 "Wasserstein order"       = 2
-"Wasserstein radii"       = [0.0, 1e-2, 5e-2, 1e-1]
+"Wasserstein radii"       = [0.0, 1e-2, 5e-2, 1e-1, 2e-1, 5e-1]
 
 [problem]
 "number of variables"      = 10
