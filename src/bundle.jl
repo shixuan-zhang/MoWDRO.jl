@@ -28,6 +28,7 @@ function bisection_feas_cut(
         coef_max::Float64 = VAL_INF,
         feas_tol::Float64 = VAL_TOL,
         flag_safe::Bool = true,
+        time_limit::Int = -1,
         print::Int = 0
     ) where T <: SampleSubproblem
     if feas_tol <= 0.0
@@ -40,6 +41,7 @@ function bisection_feas_cut(
     w_best = w_temp
     cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print-1)
     cut_best = cut_temp
+    time_start = time()
     # bisection in w
     while w_ub - w_lb > feas_tol
         if isnothing(cut_temp) || maximum(abs.(cut_temp)) > coef_max
@@ -51,6 +53,9 @@ function bisection_feas_cut(
         end
         w_temp = (w_lb + w_ub) / 2
         cut_temp = eval_cut(subproblem, [sol_x;w_temp], samples, wassinfo, print=print-1)
+        if time_limit > 0 && time() - time_start > time_limit
+            return cut_best, w_best
+        end
     end
     if flag_safe
         w_best = min(w_best+feas_tol, max_aux)
@@ -138,7 +143,7 @@ function solve_main_level(
         if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef # the moment relaxation is unbounded/infeasible
             cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut, 
                                             max_aux=max_aux, min_aux=min_aux, feas_tol=tol_aux_feas, 
-                                            coef_max=max_cut_coef, print=print)
+                                            coef_max=max_cut_coef, time_limit=time_limit, print=print)
         end
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
@@ -160,6 +165,14 @@ function solve_main_level(
     iter = 1
     # loop until the bounds are close (in either the absolute or the relative sense)
     while (max_obj - min_obj) / max(1, abs(min_obj)) > opt_gap
+        # check if the wall-clock time limit has been exceeded
+        if time_limit > 0 && (time() - time_start) > time_limit
+            if print >= 0
+                printfmtln(" The level bundle method time limit ({} s) exceeded after {} iteration(s)",
+                           time_limit, iter - 1)
+            end
+            return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
+        end
         # update the loss/recourse approximation
         @constraint(main.model, main.ϕ >= cut'*[1;main.x;main.w])
         # get an updated lower bound
@@ -220,7 +233,7 @@ function solve_main_level(
             if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef # the moment relaxation is unbounded/infeasible
                 cut, sol_w = bisection_feas_cut(subproblem, samples, wassinfo, sol_x, sol_w, eval_cut, 
                                                 max_aux=max_aux, min_aux=min_aux, feas_tol=tol_aux_feas,
-                                                coef_max=max_cut_coef, print=print)
+                                                coef_max=max_cut_coef, time_limit=time_limit, print=print)
             end
         else
             cut[1:dim_x+1] = eval_nominal(subproblem, sol_x, samples)
@@ -255,14 +268,6 @@ function solve_main_level(
         if iter > max_iter
             if print >= 0
                 printfmtln(" The level bundle method does not converge within {} iterations", max_iter)
-            end
-            return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
-        end
-        # check if the wall-clock time limit has been exceeded
-        if time_limit > 0 && (time() - time_start) > time_limit
-            if print >= 0
-                printfmtln(" The level bundle method time limit ({} s) exceeded after {} iteration(s)",
-                           time_limit, iter - 1)
             end
             return MainSolution(opt_x, opt_u, opt_f, opt_ϕ)
         end
@@ -346,7 +351,7 @@ function solve_main_proximal(
         if isnothing(cut) || maximum(abs.(cut)) > max_cut_coef
             cut, ctr_w = bisection_feas_cut(subproblem, samples, wassinfo, ctr_x, ctr_w, eval_cut, 
                                             max_aux=max_aux, min_aux=min_aux, feas_tol=tol_aux_feas, 
-                                            coef_max=max_cut_coef, print=print)
+                                            coef_max=max_cut_coef, time_limit=time_limit, print=print)
         end
     else
         cut[1:dim_x+1] = eval_nominal(subproblem, ctr_x, samples)

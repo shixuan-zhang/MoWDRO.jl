@@ -57,7 +57,7 @@ WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
 NUM_REPS       = parse_num_reps(EXP_CFG)
 TIME_LIMIT     = parse_time_limit(EXP_CFG)
 WASS_RADII     = parse_wass_radii(EXP_CFG)
-NCVX_MAX_TIME  = TIME_LIMIT > 0 ? ceil(Int, TIME_LIMIT*min(1,nworkers()/maximum(TRAIN_SIZES))) : 0
+NCVX_MAX_TIME  = max(TIME_LIMIT, 0)
 
 # bind problem-specific settings from [problem]
 const PROB_CFG = CONFIG["problem"]
