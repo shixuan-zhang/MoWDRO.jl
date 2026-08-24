@@ -1,23 +1,24 @@
 [experiment]
-"training sample sizes"   = [5, 10, 20, 30, 40]
-"testing sample size"     = 10000
-"target optimality gap"   = 1.0e-4
-"Wasserstein dual min"    = 0.0
-"Wasserstein dual max"    = 1.0e6
-"loss lower bound"        = 0.0
-"maximum cut coefficient" = 1.0e5
-"baseline method"         = "noncvx"
-"time limit"              = 600
-"radius scaling"          = 0
-"number of replications"  = 3
-"Wasserstein order"       = 2
-"Wasserstein radii"       = [0.0, 1e-2, 5e-2, 1e-1, 2e-1, 5e-1]
+"training sample sizes"    = [5, 10, 20, 30, 40]
+"testing sample size"      = 10000
+"target optimality gap"    = 1.0e-4
+"Wasserstein dual min"     = 0.0
+"Wasserstein dual max"     = 1.0e6
+"loss lower bound"         = 0.0
+"maximum cut coefficient"  = 1.0e5
+"baseline method"          = "noncvx"
+"time limit"               = 600
+"nonconvex baseline bound" = 100       # positive value tightens Ξ in the nonconvex baseline
+"radius scaling"           = 0
+"number of replications"   = 3
+"Wasserstein order"        = 2
+"Wasserstein radii"        = [0.0, 1e-2, 5e-2, 1e-1]
 
 [problem]
 "number of variables"      = 10
 "truth polynomial degree"  = 2
 "noise standard deviation" = 0.1
-"support set"              = "box"      # options: "full-space", "orthant", or "box"
+"support set"              = "orthant"  # options: "full-space", "orthant", or "box"
 "probability for sparsity" = 0.2
 "regression type"          = "quantile" # options: "mean" (squared loss) or "quantile" (pinball loss)
 "quantile level"           = 0.5        # τ ∈ (0,1); used only when "regression type" = "quantile"

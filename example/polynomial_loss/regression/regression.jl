@@ -56,6 +56,7 @@ RADIUS_SCALING = Int(get(EXP_CFG, "radius scaling", 0))
 WASS_ORDER     = Int(EXP_CFG["Wasserstein order"])
 NUM_REPS       = parse_num_reps(EXP_CFG)
 TIME_LIMIT     = parse_time_limit(EXP_CFG)
+NCVX_BOUND     = Float64(get(EXP_CFG, "nonconvex baseline bound", -1.0))
 WASS_RADII     = parse_wass_radii(EXP_CFG)
 NCVX_MAX_TIME  = max(TIME_LIMIT, 0)
 
@@ -157,6 +158,40 @@ function experiment_regression(
         for _ in 1:num_reps
     ]
     sample_test = map(augment_sample, [cholesky(Σ).L * randn(m) for _ in 1:test_size])
+    # Verify training samples against the artificial noncvx bound and
+    # auto-extend it to the max ∞-norm of the training samples on violation.
+    # `noncvx_bound` shadows the module-level NCVX_BOUND so we can rebind
+    # locally without touching the constant.
+    noncvx_bound = NCVX_BOUND
+    if baseline == "noncvx" && noncvx_bound > 0
+        check = if support_set == "orthant"
+            s -> all(x -> x <= noncvx_bound, s)
+        elseif support_set == "full-space"
+            s -> all(x -> -noncvx_bound <= x <= noncvx_bound, s)
+        else
+            _ -> true    # "box": z ∈ [0,1]^m already, bound not added
+        end
+        n_bad   = 0
+        n_total = 0
+        for rep_samples in sample_train_full_per_rep
+            for s in rep_samples
+                n_total += 1
+                check(s) || (n_bad += 1)
+            end
+        end
+        if n_bad > 0
+            max_norm = maximum(
+                maximum(abs, s)
+                for rep_samples in sample_train_full_per_rep
+                for s in rep_samples)
+            println("WARNING: ", n_bad, " of ", n_total,
+                    " training samples violate the artificial noncvx bound M = ",
+                    noncvx_bound,
+                    "; automatically extending M to the max ∞-norm of the training",
+                    " samples = ", max_norm, ".")
+            noncvx_bound = max_norm
+        end
+    end
     # define the loss function
     n = length(A)
     @polyvar x[1:n] ξ[1:(m+1)] # ξ = (z,v)
@@ -181,6 +216,26 @@ function experiment_regression(
         F2 = (τ - 1.0) * residual
         SamplePolynomialLoss(x, ξ, [F1, F2],
                              [differentiate(F1, x), differentiate(F2, x)], Ξ)
+    end
+    # Companion loss for the nonconvex baseline: same F / ∇ₓF as `loss`, but
+    # with an artificial bound applied to Ξ so Gurobi's spatial B&B has a
+    # bounded feasible set. When the bound is disabled (noncvx_bound ≤ 0) or
+    # the baseline is not the nonconvex one, this is just `loss` itself.
+    loss_NC = if baseline == "noncvx" && noncvx_bound > 0
+        Ξ_NC = if support_set == "orthant"
+            basicsemialgebraicset(FullSpace(),
+                [[ξ[i] + 0.0            for i in 1:m];
+                 [noncvx_bound - ξ[i]   for i in 1:(m+1)]])
+        elseif support_set == "full-space"
+            basicsemialgebraicset(FullSpace(),
+                [[noncvx_bound - ξ[i]   for i in 1:(m+1)];
+                 [noncvx_bound + ξ[i]   for i in 1:(m+1)]])
+        else # "box" — already bounded on z; leave unchanged
+            loss.Ξ
+        end
+        SamplePolynomialLoss(loss.x, loss.ξ, loss.F, loss.∇ₓF, Ξ_NC)
+    else
+        loss
     end
     # print the problem information
     println("Start the experiment on the polynomial regression problem...")
@@ -324,7 +379,7 @@ function experiment_regression(
                                      noncvx_solver=noncvx_solver, print=print)
                 time_start_NC = time()
                 sol_NC = solve_main_level(main_NC,
-                                          loss,
+                                          loss_NC,
                                           sample_train,
                                           wassinfo,
                                           print=1,
