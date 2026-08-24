@@ -1,5 +1,5 @@
 [experiment]
-"training sample sizes"    = [5, 10, 20, 30, 40]
+"training sample sweeps"  = [{ start = 10, stop = 100, step = 10 }]
 "testing sample size"      = 10000
 "target optimality gap"    = 1.0e-4
 "Wasserstein dual min"     = 0.0
@@ -9,10 +9,11 @@
 "baseline method"          = "noncvx"
 "time limit"               = 600
 "nonconvex baseline bound" = 100       # positive value tightens Ξ in the nonconvex baseline
-"radius scaling"           = 0
-"number of replications"   = 3
+"radius scaling"           = 2
+"random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"number of replications"   = 1
 "Wasserstein order"        = 2
-"Wasserstein radii"        = [0.0, 1e-2, 5e-2, 1e-1]
+"Wasserstein radii"        = [0.0, 1e-2, 2e-2, 5e-2, 1e-1]
 
 [problem]
 "number of variables"      = 10
