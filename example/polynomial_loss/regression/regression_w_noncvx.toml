@@ -8,7 +8,7 @@
 "maximum cut coefficient"  = 1.0e5
 "baseline method"          = "noncvx"
 "time limit"               = 600
-"nonconvex baseline bound" = 1.0e6  # positive value tightens Ξ in the nonconvex baseline
+"nonconvex baseline bound" = 1.0e4  # positive value tightens Ξ in the nonconvex baseline
 "radius scaling"           = 2
 "random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
 "number of replications"   = 1
