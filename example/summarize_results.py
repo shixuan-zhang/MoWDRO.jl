@@ -16,7 +16,9 @@ if str_ext_name != '.csv':
 data = pd.read_csv(str_input_file)
 
 cpos_cols = [c for c in data.columns if c.startswith('CPOS_')]
-has_cpos = 'CPOS_TIME' in cpos_cols
+has_cpos  = 'CPOS_TIME' in cpos_cols
+ncvx_cols = [c for c in data.columns if c.startswith('NCVX_')]
+has_ncvx  = 'NCVX_TIME' in ncvx_cols
 # Quantile-regression runs emit a `QUANTILE_LEVEL` column filled with τ on
 # every row. When present, the summarizer relabels each per-radius plot to
 # reflect the pinball-loss context; the underlying data schema is otherwise
@@ -28,11 +30,14 @@ has_quantile = ('QUANTILE_LEVEL' in data.columns
 mean_cols = ['WASS_RAD', 'TRAIN_TIME', 'TRAIN_OBJ',
              'TEST_MEAN', 'TEST_STD', 'TEST_Q10', 'TEST_MED', 'TEST_Q90']
 mean_cols += cpos_cols
+mean_cols += ncvx_cols
 if has_quantile:
     mean_cols += ['QUANTILE_LEVEL']
 std_cols = ['TRAIN_OBJ', 'TEST_MEAN', 'TEST_STD']
 if has_cpos:
     std_cols = std_cols + ['CPOS_OBJ', 'CPOS_MEAN', 'CPOS_STD']
+if has_ncvx:
+    std_cols = std_cols + ['NCVX_OBJ', 'NCVX_MEAN', 'NCVX_STD']
 
 grouped = data.groupby(['TRAIN_SIZE', 'WASS_IDX'])
 single_replication = (grouped.size() <= 1).all()
@@ -187,27 +192,53 @@ def fmt_pm(mean, std, digits):
     return "$" + fmt(mean, digits) + r" \pm " + fmt(std, digits) + "$"
 
 
+# Active baseline groups (display order: CPOS first, then NCVX). Each entry
+# contributes a 4-column block (Time, Training Obj., Test Mean, Test Std.)
+# to the right of the Moment-WDRO block. `prefix` names the CSV column
+# family; `label` is the multicolumn header shown in the LaTeX table.
+baseline_groups = []
 if has_cpos:
-    table = r"""\documentclass{standalone}
-\usepackage{booktabs,mathpazo}
-\begin{document}
-\begin{tabular}{rrrrrrrrrr}
-\toprule
- & & \multicolumn{4}{c}{Moment-WDRO} & \multicolumn{4}{c}{Hanasusanto-Kuhn} \\
-\cmidrule(lr){3-6} \cmidrule(lr){7-10}
-$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std.
-     & Time (s) & Training Obj. & Test Mean & Test Std. \\
-\midrule
-"""
+    baseline_groups.append({'prefix': 'CPOS', 'label': 'Hanasusanto-Kuhn'})
+if has_ncvx:
+    baseline_groups.append({'prefix': 'NCVX', 'label': 'Nonconvex baseline'})
+
+n_base_cols    = 6                                    # N, r, Time, Training Obj, Test Mean, Test Std
+n_per_baseline = 4                                    # Time, Training Obj, Test Mean, Test Std
+n_total_cols   = n_base_cols + n_per_baseline * len(baseline_groups)
+col_spec       = 'r' * n_total_cols
+
+if baseline_groups:
+    # top row: two blank cells (for N and r), then Moment-WDRO multicolumn
+    # plus one multicolumn per active baseline.
+    top = ' & & ' + ' & '.join(
+        [r'\multicolumn{4}{c}{Moment-WDRO}'] +
+        [r'\multicolumn{4}{c}{' + g['label'] + r'}' for g in baseline_groups]
+    ) + r' \\'
+    # cmidrules: 3-6 for Moment-WDRO, then 7-10, 11-14, ... for each baseline.
+    starts    = [3 + 4 * i for i in range(1 + len(baseline_groups))]
+    cmidrules = ' '.join(
+        r'\cmidrule(lr){' + str(s) + '-' + str(s + 3) + '}' for s in starts)
+    # sub-header: N & r & (Time & Training Obj. & Test Mean & Test Std.)
+    # broken across one line per (Moment-WDRO + baseline) group for readability
+    # in the emitted .tex source.
+    baseline_line = 'Time (s) & Training Obj. & Test Mean & Test Std.'
+    sub_lines     = ['$N$ & $r$ & ' + baseline_line]
+    for _ in baseline_groups:
+        sub_lines.append('     & ' + baseline_line)
+    sub = '\n'.join(sub_lines) + r' \\'
+    header_block = top + '\n' + cmidrules + '\n' + sub + '\n'
 else:
-    table = r"""\documentclass{standalone}
-\usepackage{booktabs,mathpazo}
-\begin{document}
-\begin{tabular}{rrrrrr}
-\toprule
-$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std. \\
-\midrule
-"""
+    header_block = r'$N$ & $r$ & Time (s) & Training Obj. & Test Mean & Test Std. \\' + '\n'
+
+table = (
+    r'\documentclass{standalone}' + '\n' +
+    r'\usepackage{booktabs,mathpazo}' + '\n' +
+    r'\begin{document}' + '\n' +
+    r'\begin{tabular}{' + col_spec + '}' + '\n' +
+    r'\toprule' + '\n' +
+    header_block +
+    r'\midrule' + '\n'
+)
 
 
 def obj_cell(row, mean_col, std_col, digits):
@@ -216,7 +247,7 @@ def obj_cell(row, mean_col, std_col, digits):
     return fmt_pm(row[mean_col], row[std_col], digits)
 
 
-obj_digits = 2 if has_cpos else 3
+obj_digits = 2 if (has_cpos or has_ncvx) else 3
 
 prev_train_size = None
 for _, row in agg.iterrows():
@@ -230,14 +261,15 @@ for _, row in agg.iterrows():
         fmt(row['TRAIN_TIME'], 1),
         obj_cell(row, 'TRAIN_OBJ', 'TRAIN_OBJ_SAMPLE_STD', obj_digits),
         obj_cell(row, 'TEST_MEAN', 'TEST_MEAN_SAMPLE_STD', obj_digits),
-        obj_cell(row, 'TEST_STD', 'TEST_STD_SAMPLE_STD', obj_digits),
+        obj_cell(row, 'TEST_STD',  'TEST_STD_SAMPLE_STD',  obj_digits),
     ]
-    if has_cpos:
+    for g in baseline_groups:
+        p = g['prefix']
         cells += [
-            fmt(row['CPOS_TIME'], 1),
-            obj_cell(row, 'CPOS_OBJ', 'CPOS_OBJ_SAMPLE_STD', obj_digits),
-            obj_cell(row, 'CPOS_MEAN', 'CPOS_MEAN_SAMPLE_STD', obj_digits),
-            obj_cell(row, 'CPOS_STD', 'CPOS_STD_SAMPLE_STD', obj_digits),
+            fmt(row[p + '_TIME'], 1),
+            obj_cell(row, p + '_OBJ',  p + '_OBJ_SAMPLE_STD',  obj_digits),
+            obj_cell(row, p + '_MEAN', p + '_MEAN_SAMPLE_STD', obj_digits),
+            obj_cell(row, p + '_STD',  p + '_STD_SAMPLE_STD',  obj_digits),
         ]
     table += " & ".join(cells) + r" \\" + "\n"
 
