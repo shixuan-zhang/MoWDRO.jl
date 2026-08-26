@@ -10,7 +10,7 @@
 "time limit"               = 600
 "nonconvex baseline bound" = 1.0e4  # positive value tightens Ξ in the nonconvex baseline
 "radius scaling"           = 2
-"random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"random seed"              = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
 "number of replications"   = 1
 "Wasserstein order"        = 2
 "Wasserstein radii"        = [0.0, 1e-2, 2e-2, 5e-2, 1e-1]

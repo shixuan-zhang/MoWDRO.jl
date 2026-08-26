@@ -247,7 +247,7 @@ def obj_cell(row, mean_col, std_col, digits):
     return fmt_pm(row[mean_col], row[std_col], digits)
 
 
-obj_digits = 2 if (has_cpos or has_ncvx) else 3
+obj_digits = 2 if has_cpos else 3
 
 prev_train_size = None
 for _, row in agg.iterrows():
