@@ -5,18 +5,21 @@ module MoWDRO
 using LinearAlgebra, DynamicPolynomials, SumOfSquares, SemialgebraicSets, MultivariateMoments
 using JuMP, PolyJuMP
 using Format
+using Distributed
 # set default solvers
-import HiGHS, CSDP
+import HiGHS, CSDP, SCIP
 const DEFAULT_LP = HiGHS.Optimizer
 const DEFAULT_SDP = CSDP.Optimizer
+const DEFAULT_NCVX = SCIP.Optimizer
 
 # export types and methods for application programming interface
 export MainProblem, MainSolution, WassInfo
 export SampleSubproblem, SampleLinearRecourse, SamplePolynomialLoss
-export solve_main_level, eval_nominal, eval_moment_Wass
+export solve_main_level, solve_main_proximal, eval_nominal, eval_moment_Wass
+export solve_two_stage_copos, eval_noncvx_Wass
 
 # define module-wide shared parameters
-const NUM_DIG = 6
+const NUM_DIG = 9
 const VAL_TOL = 1.0e-6
 const VAL_INF = 1.0e8
 const NUM_MAX_ITER = 1000
@@ -28,7 +31,11 @@ include("methods.jl")
 
 # include algorithms and relaxations
 include("moment_relax.jl")
-include("level_bundle.jl")
+include("bundle.jl")
+
+# include baseline reformulations
+include("baseline/copos_form.jl")
+include("baseline/noncvx_form.jl")
 
 
 end

@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 CSDP = "0a46da34-8e4b-519e-b418-48813639ff34"
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 DynamicPolynomials = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
 ECOS = "e2685f51-7e38-5353-a97d-a921fd2c8199"
 Format = "1fa38f19-a742-5d3f-a2b9-30dd87b9d5f8"
@@ -14,6 +15,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MultivariateBases = "be282fd4-ad43-11e9-1d11-8bd9d7e43378"
 MultivariateMoments = "f4abf1af-0426-5881-a0da-e2f168889b5e"
 PolyJuMP = "ddf597a6-d67e-5340-b84c-e37d84115374"
+SCIP = "82193955-e24f-5292-bf16-6f2c5261a85f"
 SemialgebraicSets = "8e049039-38e8-557d-ae3a-bc521ccf6204"
 SumOfSquares = "4b9e565b-77fc-50a5-a571-1244f986bda1"
 
@@ -22,6 +24,7 @@ CSDP = "1.1.1"
 ECOS = "1.1.3"
 Format = "1.3.7"
 PolyJuMP = "0.7.5"
+SCIP = "0.12.8"
 julia = "1.6.7"
 
 [extras]
@@ -29,3 +32,9 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
+
+# Sub-projects sharing this Manifest. Activate the example environment with
+# `julia --project=example` to pick up CSV / DataFrames / TOML / Statistics
+# alongside MoWDRO and any user-installed commercial solvers.
+[workspace]
+projects = ["example"]

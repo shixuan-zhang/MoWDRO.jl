@@ -1,0 +1,27 @@
+[experiment]
+"training sample sizes"   = [5]
+"testing sample size"     = 10000
+"target optimality gap"   = 1.0e-2
+"Wasserstein dual min"    = 1.0e-1
+"Wasserstein dual max"    = 1.0e4
+"loss lower bound"        = 0.0
+"baseline method"         = "all"
+"radius scaling"          = 0
+"random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"number of replications"  = 1
+"Wasserstein order"       = 2
+"Wasserstein radii sweeps" = [
+    { start = 0.0, stop = 0.09, step = 0.01 },
+    { start = 0.1, stop = 0.9,  step = 0.1  },
+    { start = 1.0, stop = 10.0, step = 1.0  },
+]
+
+[problem]
+"number of facilities"    = 3
+"number of sites"         = 4
+"holding cost"            = 1.0
+"subcontract cost"        = 10.0
+"mean demand"             = 3.0
+"demand variance"         = 0.2
+"maximum capacity"        = 100.0
+"number of digits"        = 3

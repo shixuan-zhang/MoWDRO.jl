@@ -1,0 +1,28 @@
+[experiment]
+"training sample sweeps"  = [{ start = 10, stop = 100, step = 10 }]
+"testing sample size"     = 10000
+"target optimality gap"   = 1.0e-2
+"Wasserstein dual min"    = 1.0e-1
+"Wasserstein dual max"    = 1.0e3
+"loss lower bound"        = -1.0e2
+"baseline method"         = "copos"
+"radius scaling"          = 15
+"random seed"             = "none"  # allowed: integer (e.g. 42) | "none" for fresh random seeding
+"number of replications"  = 1
+"Wasserstein order"       = 2
+"Wasserstein radii"       = [0.0, 1.0e-2, 5.0e-2, 1.0e-1]
+
+[problem]
+"number of parts"         = 10
+"number of products"      = 5 
+"minimum price"           = 2.0
+"maximum price"           = 5.0
+"minimum cost"            = 1.0
+"maximum cost"            = 2.0
+"late ratio"              = 3.0
+"maximum salvage"         = 1.0
+"minimum demand"          = 1.0
+"maximum demand"          = 2.0
+"demand variance"         = 0.1
+"maximum storage"         = 5.0
+"number of digits"        = 3
