@@ -1,15 +1,15 @@
 # MoWDRO.jl
 
 Implementation of **Mo**ment relaxations for data-driven **W**asserstein **D**istributionally **R**obust **O**ptimization problems.
-For details on the formulations and asymptotic consistency, please see our [arXiv preprint](https://arxiv.org/abs/2505.19278).
+For details on the formulations and asymptotic consistency, please see our paper [here](https://arxiv.org/abs/2505.19278).
 
 
 ## Prerequisites
 
 * Julia `>= 1.6.7` (see `Project.toml`).
 * Python 3 with `pandas` for the `example/summarize_results.py` post-processing script.
-* Solvers used by the experiment drivers:
-  * The drivers under `example/` currently default to the commercial solvers
+* Solvers used by the experiments:
+  * The experiment scripts under `example/` currently default to the commercial solvers
     **Gurobi** (LP/MILP and the nonconvex-QCQP baseline via `NonConvex=2`) and
     **Mosek** (SDP moment relaxations) for speed and numerical stability. Each
     requires a valid license and the corresponding Julia wrapper (`Gurobi.jl`,
@@ -17,7 +17,7 @@ For details on the formulations and asymptotic consistency, please see our [arXi
   * The `MoWDRO` module itself depends only on open-source packages
     (`CSDP`, `ECOS`, `HiGHS`, `SCIP`; see `Project.toml`). If Gurobi/Mosek are
     unavailable, replace the `Mosek.Optimizer` argument to `solve_main_level` /
-    `solve_two_stage_copos` in the driver scripts with an open-source SDP
+    `solve_two_stage_copos` in the experiment scripts with an open-source SDP
     solver such as `CSDP.Optimizer`, and swap `Gurobi.Optimizer` for an
     LP/QP solver such as `HiGHS.Optimizer`.
 
@@ -35,7 +35,7 @@ src/                         # `MoWDRO` module source
     └── noncvx_form.jl       #     nonconvex-QCQP baseline
 test/                        # module test suite (run via `] test` or `runtests.jl`)
 example/
-├── experiment_common.jl     # shared TOML/CLI helpers `include`d by every driver
+├── experiment_common.jl     # shared TOML/CLI helpers `include`d by every experiment script
 ├── summarize_results.py     # per-radius plots and comparison tables from CSVs
 ├── linear_recourse/         # two-stage linear-recourse experiments
 │   ├── production/          #   two-stage multi-product production problem
@@ -54,7 +54,7 @@ per-category READMEs:
 
 ## Quickstart
 
-From the parent directory of `MoWDRO.jl/`, run any driver against its sibling
+From the parent directory of `MoWDRO.jl/`, run any experiment script against its sibling
 `.toml`:
 
 ```
@@ -62,19 +62,19 @@ julia --project=MoWDRO.jl/example \
       MoWDRO.jl/example/linear_recourse/production/production.jl
 ```
 
-All four drivers follow the same CLI convention (defined in
+All four experiment scripts follow the same CLI convention (defined in
 `example/experiment_common.jl`):
 
 ```
-julia --project=MoWDRO.jl/example <driver.jl> [<config.toml>] [<output.csv>]
+julia --project=MoWDRO.jl/example <experiment_script.jl> [<config.toml>] [<output.csv>]
 ```
 
-* If `<config.toml>` is omitted, the sibling `.toml` next to the driver is used
+* If `<config.toml>` is omitted, the sibling `.toml` next to the experiment script is used
   (e.g. `production/production.toml`).
 * If `<output.csv>` is omitted, a default name of the form
   `result_<name>_<sizes>.csv` is written to the current working directory.
 
-Every driver initializes `Distributed` workers, so add `-p <N>` to run the
+Every experiment script initializes `Distributed` workers, so add `-p <N>` to run the
 per-iteration workload across `N` worker processes:
 
 ```
@@ -87,7 +87,7 @@ julia -p 4 --project=MoWDRO.jl/example \
 
 ## Configuring an experiment
 
-Every driver parses the same `[experiment]` TOML table via
+Every experiment script parses the same `[experiment]` TOML table via
 `example/experiment_common.jl`. The available knobs are:
 
 | Key | Meaning |
@@ -106,7 +106,7 @@ Every driver parses the same `[experiment]` TOML table via
 | `"time limit"` | Wall-clock cap in seconds for the bundle method (`-1` disables). |
 
 Problem-specific knobs live under the `[problem]` table and vary by
-experiment; see the sample TOMLs beside each driver.
+experiment; see the sample TOMLs beside each experiment script.
 
 
 ## Post-processing
